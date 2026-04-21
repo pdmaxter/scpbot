@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTC Dual-Strategy Bot Dashboard</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+:root {
+  --bg:      #0b0d14; --panel:  #12141f; --panel2: #181a28;
+  --border:  #252840; --text:   #c9cde0; --muted:  #5a6080;
+  --green:   #00e676; --red:    #ff3d57; --blue:   #2979ff;
+  --orange:  #ff9100; --purple: #ce93d8; --yellow: #ffd740;
+  --teal:    #00bcd4; --pink:   #f48fb1;
+  --font: 'Segoe UI', system-ui, sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px;overflow:hidden;}
+
+/* ── Layout ── */
+.root{display:grid;grid-template-rows:52px 1fr 220px;height:100vh;}
+.header{display:flex;align-items:center;gap:10px;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--border);z-index:10;}
+.body{display:grid;grid-template-columns:1fr 268px 268px;overflow:hidden;}
+.bottom{display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid var(--border);overflow:hidden;}
+
+/* ── Charts column ── */
+.charts-col{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);}
+#price-chart{flex:1 1 0;min-height:0;}
+.strip{flex:0 0 96px;border-top:1px solid var(--border);}
+.strip2{flex:0 0 76px;border-top:1px solid var(--border);}
+
+/* ── Strategy panels ── */
+.strat-col{display:flex;flex-direction:column;overflow-y:auto;gap:1px;background:var(--border);border-right:1px solid var(--border);}
+.strat-col:last-child{border-right:none;}
+.card{background:var(--panel);padding:10px 12px;}
+.card-title{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px;}
+.card-title .strat-tag{padding:1px 6px;border-radius:2px;font-size:9px;}
+.tag-scalp{background:#2979ff22;color:var(--blue);border:1px solid #2979ff40;}
+.tag-break{background:#00bcd422;color:var(--teal);border:1px solid #00bcd440;}
+
+/* ── Buttons & inputs ── */
+.inp{background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:4px 7px;border-radius:4px;width:100%;font-size:11px;}
+.inp:focus{outline:none;border-color:var(--blue);}
+.inp-label{font-size:10px;color:var(--muted);margin-bottom:2px;}
+.inp-row{display:flex;gap:6px;margin-bottom:6px;}
+.btn{padding:5px 9px;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;transition:.15s;white-space:nowrap;}
+.btn-start{background:var(--green);color:#000;}
+.btn-stop{background:var(--red);color:#fff;}
+.btn-pause{background:#ffd74022;color:var(--yellow);border:1px solid #ffd74040;}
+.btn-resume{background:#00e67622;color:var(--green);border:1px solid #00e67640;}
+.btn-reset{background:#5a608020;color:var(--muted);border:1px solid var(--border);}
+.btn-new{background:#2979ff22;color:var(--blue);border:1px solid #2979ff44;}
+.btn:hover{opacity:.82;}
+.btn:disabled{opacity:.3;cursor:not-allowed;}
+.btn-row{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px;}
+.new-sess-form{display:none;margin-bottom:7px;padding:7px;background:var(--panel2);border-radius:4px;border:1px solid var(--border);}
+.new-sess-form.open{display:block;}
+
+/* ── Session info ── */
+.sess-grid{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;}
+.sess-lbl{color:var(--muted);}
+.sess-val{font-weight:600;font-variant-numeric:tabular-nums;}
+.sess-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:.05em;}
+.sess-running{background:#00e67618;color:var(--green);border:1px solid #00e67630;}
+.sess-paused{background:#ffd74018;color:var(--yellow);border:1px solid #ffd74030;}
+.sess-stopped{background:#ff3d5718;color:var(--red);border:1px solid #ff3d5730;}
+
+/* ── Position ── */
+.pos-empty{color:var(--muted);text-align:center;padding:8px 0;font-size:11px;}
+.pos-badge{display:inline-block;padding:2px 7px;border-radius:3px;font-weight:700;font-size:10px;letter-spacing:.06em;margin-bottom:6px;}
+.pos-long{background:#00e67620;color:var(--green);border:1px solid #00e67640;}
+.pos-short{background:#ff3d5720;color:var(--red);border:1px solid #ff3d5740;}
+.pos-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px 6px;}
+.pos-row{display:flex;flex-direction:column;}
+.pos-lbl{font-size:10px;color:var(--muted);}
+.pos-val{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;}
+
+/* ── Metrics ── */
+.metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+.metric{background:var(--panel2);border-radius:4px;padding:5px 7px;}
+.metric-lbl{font-size:10px;color:var(--muted);}
+.metric-val{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:1px;}
+
+/* ── Equity mini chart ── */
+.equity-mini{height:52px;}
+
+/* ── Bottom panels ── */
+.bottom-panel{overflow:hidden;background:var(--panel);display:flex;flex-direction:column;border-right:1px solid var(--border);}
+.bottom-panel:last-child{border-right:none;}
+.panel-header{flex-shrink:0;background:var(--panel);border-bottom:1px solid var(--border);padding:5px 11px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:7px;}
+.tab-bar{display:flex;border-bottom:1px solid var(--border);background:var(--panel2);}
+.tab{flex:1;padding:5px;border:none;background:none;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;transition:.15s;}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue);}
+.tab-panel{flex:1;overflow-y:auto;display:none;}
+.tab-panel.active{display:block;}
+table{width:100%;border-collapse:collapse;font-size:10px;}
+th{position:sticky;top:0;background:var(--panel2);padding:4px 6px;text-align:left;font-weight:600;color:var(--muted);font-size:9px;border-bottom:1px solid var(--border);}
+td{padding:3px 6px;border-bottom:1px solid #1a1c2a;white-space:nowrap;}
+tr:last-child td{border-bottom:none;}
+.badge{display:inline-block;padding:1px 5px;border-radius:2px;font-size:9px;font-weight:700;}
+.badge-long{background:#00e67618;color:var(--green);}
+.badge-short{background:#ff3d5718;color:var(--red);}
+.badge-tp{background:#2979ff18;color:var(--blue);}
+.badge-sl{background:#ff910018;color:var(--orange);}
+.badge-misc{background:#25284018;color:var(--muted);}
+.badge-active{background:#00e67618;color:var(--green);}
+.badge-inactive{background:#5a608018;color:var(--muted);}
+.badge-scalp{background:#2979ff18;color:var(--blue);}
+.badge-break{background:#00bcd418;color:var(--teal);}
+
+/* ── Activity log ── */
+.log-line{display:flex;gap:8px;padding:3px 10px;border-bottom:1px solid #1a1c2a;font-size:10px;}
+.log-time{color:var(--muted);flex-shrink:0;width:60px;}
+.log-msg{flex:1;}
+.log-info{color:var(--text);}
+.log-success{color:var(--green);}
+.log-warn{color:var(--yellow);}
+.log-error{color:var(--red);}
+
+/* ── Header ── */
+.logo{font-weight:800;font-size:14px;color:var(--text);letter-spacing:-.01em;white-space:nowrap;}
+.logo span{color:var(--orange);}
+.price-block{display:flex;align-items:baseline;gap:5px;margin-left:8px;}
+.price-big{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;}
+.price-chg{font-size:11px;font-weight:700;}
+.ticker-row{display:flex;gap:10px;font-size:11px;color:var(--muted);}
+.ticker-item span{color:var(--text);font-weight:600;}
+.spacer{flex:1;}
+.status-area{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.strat-status{display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;background:var(--panel2);border:1px solid var(--border);}
+.strat-status-label{font-size:10px;font-weight:700;color:var(--muted);}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;}
+.dot-green{background:var(--green);box-shadow:0 0 5px var(--green);}
+.dot-red{background:var(--red);}
+.dot-yellow{background:var(--yellow);animation:pulse 1s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+.mode-badge{background:#ff910022;color:var(--orange);border:1px solid #ff910040;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:.05em;}
+.ws-badge{font-size:10px;color:var(--muted);}
+.ws-on{color:var(--green);}.ws-off{color:var(--red);}
+.pos-text{color:var(--green);}.neg-text{color:var(--red);}
+
+::-webkit-scrollbar{width:3px;height:3px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+</style>
+</head>
+<body>
+<div class="root">
+
+<!-- ── HEADER ───────────────────────────────────────────────────────────── -->
+<header class="header">
+  <div class="logo">⚡<span>BTC</span>Dual</div>
+  <div class="price-block">
+    <span class="price-big" id="hd-price">—</span>
+    <span class="price-chg" id="hd-chg">—</span>
+  </div>
+  <div class="ticker-row">
+    <div class="ticker-item">H <span id="hd-high">—</span></div>
+    <div class="ticker-item">L <span id="hd-low">—</span></div>
+    <div class="ticker-item">Vol <span id="hd-vol">—</span></div>
+  </div>
+  <div class="spacer"></div>
+  <div class="status-area">
+    <span class="mode-badge">PAPER</span>
+    <!-- EMA Scalping status -->
+    <div class="strat-status">
+      <span style="font-size:10px;color:var(--blue);font-weight:700;">EMA</span>
+      <span class="dot dot-red" id="scalp-dot"></span>
+      <span class="strat-status-label" id="scalp-label">STOPPED</span>
+    </div>
+    <!-- Range Breakout status -->
+    <div class="strat-status">
+      <span style="font-size:10px;color:var(--teal);font-weight:700;">BRK</span>
+      <span class="dot dot-red" id="brk-dot"></span>
+      <span class="strat-status-label" id="brk-label">STOPPED</span>
+    </div>
+    <span class="ws-badge">K<span id="ws-kline"  class="ws-off">●</span></span>
+    <span class="ws-badge">T<span id="ws-ticker" class="ws-off">●</span></span>
+    <form method="POST" action="/logout" style="margin:0">
+      <button type="submit" style="background:#25284080;border:1px solid var(--border);color:var(--muted);padding:3px 9px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;letter-spacing:.04em;" title="Sign out">⎋ LOGOUT</button>
+    </form>
+  </div>
+</header>
+
+<!-- ── BODY ─────────────────────────────────────────────────────────────── -->
+<div class="body">
+
+  <!-- Charts -->
+  <div class="charts-col">
+    <div id="price-chart"></div>
+    <div class="strip"><div id="rsi-chart" style="height:100%"></div></div>
+    <div class="strip2"><div id="vol-chart" style="height:100%"></div></div>
+  </div>
+
+  <!-- ── EMA SCALPING panel ── -->
+  <div class="strat-col" id="scalp-col">
+
+    <div class="card">
+      <div class="card-title">
+        📈 EMA Scalping
+        <span class="strat-tag tag-scalp">EMA 8/21 + VWAP</span>
+      </div>
+      <div id="scalp-sess-badge" style="margin-bottom:7px;">
+        <span class="sess-badge sess-stopped">⏹ STOPPED</span>
+      </div>
+      <div class="sess-grid">
+        <span class="sess-lbl">ID</span>      <span class="sess-val" id="scalp-sess-id">—</span>
+        <span class="sess-lbl">Capital</span> <span class="sess-val" id="scalp-sess-cap">—</span>
+        <span class="sess-lbl">Risk</span>    <span class="sess-val" id="scalp-sess-risk">—</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Controls</div>
+      <div class="new-sess-form" id="scalp-new-form">
+        <div style="font-size:10px;color:var(--yellow);margin-bottom:5px;">⚠️ Fresh session with new capital</div>
+        <div class="inp-row">
+          <div style="flex:1"><div class="inp-label">Capital (USDT)</div>
+            <input class="inp" id="scalp-inp-cap" type="number" value="10000" min="100" step="100"></div>
+          <div style="flex:0 0 58px"><div class="inp-label">Risk %</div>
+            <input class="inp" id="scalp-inp-risk" type="number" value="2" min="0.5" max="10" step="0.5"></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-new" style="flex:1" onclick="newSession('scalping')">✓ Launch</button>
+          <button class="btn btn-stop" onclick="toggleNewForm('scalping',false)">✕</button>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start"  id="scalp-btn-start"  onclick="stratStart('scalping')">▶ START</button>
+        <button class="btn btn-stop"   id="scalp-btn-stop"   onclick="stratStop('scalping')"   disabled>■ STOP</button>
+        <button class="btn btn-pause"  id="scalp-btn-pause"  onclick="stratPause('scalping')"  disabled>⏸</button>
+        <button class="btn btn-resume" id="scalp-btn-resume" onclick="stratResume('scalping')" disabled>▶</button>
+        <button class="btn btn-reset"  id="scalp-btn-reset"  onclick="stratReset('scalping')">↺</button>
+        <button class="btn btn-new"    id="scalp-btn-new"    onclick="toggleNewForm('scalping',true)">+NEW</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Position</div>
+      <div id="scalp-pos"><div class="pos-empty">No active position</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Performance</div>
+      <div class="metric-grid">
+        <div class="metric"><div class="metric-lbl">Total P&L</div><div class="metric-val" id="scalp-m-pnl">$0</div></div>
+        <div class="metric"><div class="metric-lbl">Return</div><div class="metric-val" id="scalp-m-ret">0%</div></div>
+        <div class="metric"><div class="metric-lbl">Win Rate</div><div class="metric-val" id="scalp-m-wr">—</div></div>
+        <div class="metric"><div class="metric-lbl">Prof. Factor</div><div class="metric-val" id="scalp-m-pf">—</div></div>
+        <div class="metric"><div class="metric-lbl">Trades</div><div class="metric-val" id="scalp-m-trades">0</div></div>
+        <div class="metric"><div class="metric-lbl">W / L</div><div class="metric-val" id="scalp-m-wl">0/0</div></div>
+      </div>
+      <div style="margin-top:5px;padding:5px 7px;background:var(--panel2);border-radius:4px;display:flex;justify-content:space-between;">
+        <div><div class="metric-lbl">Today P&L</div><div class="metric-val" id="scalp-m-day">$0</div></div>
+        <div style="text-align:right"><div class="metric-lbl">Status</div><div style="font-size:10px;color:var(--muted)" id="scalp-m-status">Stopped</div></div>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1;min-height:68px;">
+      <div class="card-title">Equity</div>
+      <div class="equity-mini" id="scalp-equity-chart"></div>
+    </div>
+
+  </div><!-- /scalp-col -->
+
+  <!-- ── RANGE BREAKOUT panel ── -->
+  <div class="strat-col" id="brk-col">
+
+    <div class="card">
+      <div class="card-title">
+        🚀 Range Breakout
+        <span class="strat-tag tag-break">EMA50 + Range</span>
+      </div>
+      <div id="brk-sess-badge" style="margin-bottom:7px;">
+        <span class="sess-badge sess-stopped">⏹ STOPPED</span>
+      </div>
+      <div class="sess-grid">
+        <span class="sess-lbl">ID</span>      <span class="sess-val" id="brk-sess-id">—</span>
+        <span class="sess-lbl">Capital</span> <span class="sess-val" id="brk-sess-cap">—</span>
+        <span class="sess-lbl">Risk</span>    <span class="sess-val" id="brk-sess-risk">—</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Controls</div>
+      <div class="new-sess-form" id="brk-new-form">
+        <div style="font-size:10px;color:var(--yellow);margin-bottom:5px;">⚠️ Fresh session with new capital</div>
+        <div class="inp-row">
+          <div style="flex:1"><div class="inp-label">Capital (USDT)</div>
+            <input class="inp" id="brk-inp-cap" type="number" value="10000" min="100" step="100"></div>
+          <div style="flex:0 0 58px"><div class="inp-label">Risk %</div>
+            <input class="inp" id="brk-inp-risk" type="number" value="2" min="0.5" max="10" step="0.5"></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-new" style="flex:1" onclick="newSession('breakout')">✓ Launch</button>
+          <button class="btn btn-stop" onclick="toggleNewForm('breakout',false)">✕</button>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start"  id="brk-btn-start"  onclick="stratStart('breakout')">▶ START</button>
+        <button class="btn btn-stop"   id="brk-btn-stop"   onclick="stratStop('breakout')"   disabled>■ STOP</button>
+        <button class="btn btn-pause"  id="brk-btn-pause"  onclick="stratPause('breakout')"  disabled>⏸</button>
+        <button class="btn btn-resume" id="brk-btn-resume" onclick="stratResume('breakout')" disabled>▶</button>
+        <button class="btn btn-reset"  id="brk-btn-reset"  onclick="stratReset('breakout')">↺</button>
+        <button class="btn btn-new"    id="brk-btn-new"    onclick="toggleNewForm('breakout',true)">+NEW</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Position</div>
+      <div id="brk-pos"><div class="pos-empty">No active position</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Performance</div>
+      <div class="metric-grid">
+        <div class="metric"><div class="metric-lbl">Total P&L</div><div class="metric-val" id="brk-m-pnl">$0</div></div>
+        <div class="metric"><div class="metric-lbl">Return</div><div class="metric-val" id="brk-m-ret">0%</div></div>
+        <div class="metric"><div class="metric-lbl">Win Rate</div><div class="metric-val" id="brk-m-wr">—</div></div>
+        <div class="metric"><div class="metric-lbl">Prof. Factor</div><div class="metric-val" id="brk-m-pf">—</div></div>
+        <div class="metric"><div class="metric-lbl">Trades</div><div class="metric-val" id="brk-m-trades">0</div></div>
+        <div class="metric"><div class="metric-lbl">W / L</div><div class="metric-val" id="brk-m-wl">0/0</div></div>
+      </div>
+      <div style="margin-top:5px;padding:5px 7px;background:var(--panel2);border-radius:4px;display:flex;justify-content:space-between;">
+        <div><div class="metric-lbl">Today P&L</div><div class="metric-val" id="brk-m-day">$0</div></div>
+        <div style="text-align:right"><div class="metric-lbl">Status</div><div style="font-size:10px;color:var(--muted)" id="brk-m-status">Stopped</div></div>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1;min-height:68px;">
+      <div class="card-title">Equity</div>
+      <div class="equity-mini" id="brk-equity-chart"></div>
+    </div>
+
+  </div><!-- /brk-col -->
+</div><!-- /body -->
+
+<!-- ── BOTTOM ────────────────────────────────────────────────────────────── -->
+<div class="bottom">
+
+  <!-- EMA Trade Log -->
+  <div class="bottom-panel">
+    <div class="panel-header">
+      📈 EMA Scalping Trades
+      <span style="margin-left:auto;font-size:10px" id="scalp-trade-count"></span>
+    </div>
+    <div style="flex:1;overflow-y:auto;">
+      <table>
+        <thead><tr><th>#</th><th>Type</th><th>Entry</th><th>Exit</th><th>P&L</th><th>%</th><th>Exit</th><th>Time</th></tr></thead>
+        <tbody id="scalp-trade-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Breakout Trade Log -->
+  <div class="bottom-panel">
+    <div class="panel-header">
+      🚀 Breakout Trades
+      <span style="margin-left:auto;font-size:10px" id="brk-trade-count"></span>
+    </div>
+    <div style="flex:1;overflow-y:auto;">
+      <table>
+        <thead><tr><th>#</th><th>Type</th><th>Entry</th><th>Exit</th><th>P&L</th><th>%</th><th>Exit</th><th>Time</th></tr></thead>
+        <tbody id="brk-trade-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Activity Log + All Sessions -->
+  <div class="bottom-panel">
+    <div class="tab-bar">
+      <button class="tab active" id="tab-btn-log"      onclick="switchTab('log')">Activity Log</button>
+      <button class="tab"        id="tab-btn-sessions" onclick="switchTab('sessions')">All Sessions</button>
+    </div>
+    <div class="tab-panel active" id="tab-log">
+      <div id="log-body"></div>
+    </div>
+    <div class="tab-panel" id="tab-sessions">
+      <table>
+        <thead><tr><th>Strat</th><th>ID</th><th>Status</th><th>Capital</th><th>P&L</th><th>Trades</th><th>W%</th><th>Started</th></tr></thead>
+        <tbody id="sessions-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+</div><!-- /root -->
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════════════════════
+const socket     = io();
+let currentTicker = null;
+let isSyncing     = false;
+
+// Per-strategy state
+const S = {
+  scalping: { running: false, paused: false, warmedUp: false, state: null, markers: [], slLine: null, tpLine: null, entryLine: null },
+  breakout: { running: false, paused: false, warmedUp: false, state: null, markers: [], slLine: null, tpLine: null, entryLine: null },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+const fmtUSD  = n => '$' + n.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+const fmtPct  = n => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+const fmtTime = ts => new Date(ts).toTimeString().slice(0, 8);
+const fmtDT   = ts => {
+  const d = new Date(ts);
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric' }) + ' ' + d.toTimeString().slice(0, 5);
+};
+const pfx = id => id === 'scalping' ? 'scalp' : 'brk';
+
+// ═══════════════════════════════════════════════════════════════════
+//  Charts
+// ═══════════════════════════════════════════════════════════════════
+const LC_THEME = {
+  layout:   { background:{ color:'#0b0d14' }, textColor:'#8892b0' },
+  grid:     { vertLines:{ color:'#181a28' }, horzLines:{ color:'#181a28' } },
+  crosshair:{ mode: LightweightCharts.CrosshairMode.Normal },
+  rightPriceScale: { borderColor:'#252840' },
+  timeScale: { borderColor:'#252840', timeVisible:true, secondsVisible:false, rightOffset:8, barSpacing:6 },
+};
+
+let priceChart, rsiChart, volChart;
+let candleSeries, emaFastSeries, emaSlowSeries, vwapSeries, ema50Series;
+let rsiSeries, volSeries;
+
+// Per-strategy equity charts
+const equityCharts = {};
+const equitySeries = {};
+
+function initCharts () {
+  priceChart = LightweightCharts.createChart($('price-chart'), { ...LC_THEME,
+    width: $('price-chart').clientWidth, height: $('price-chart').clientHeight || 260 });
+  candleSeries  = priceChart.addCandlestickSeries({ upColor:'#00e676', downColor:'#ff3d57', borderUpColor:'#00e676', borderDownColor:'#ff3d57', wickUpColor:'#00e67680', wickDownColor:'#ff3d5780' });
+  emaFastSeries = priceChart.addLineSeries({ color:'#2979ff', lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+  emaSlowSeries = priceChart.addLineSeries({ color:'#ff9100', lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+  vwapSeries    = priceChart.addLineSeries({ color:'#ce93d8', lineWidth:1, lineStyle:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+  ema50Series   = priceChart.addLineSeries({ color:'#00bcd4', lineWidth:1, lineStyle:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+
+  rsiChart = LightweightCharts.createChart($('rsi-chart'), { ...LC_THEME,
+    width: $('rsi-chart').clientWidth, height: $('rsi-chart').clientHeight || 96,
+    rightPriceScale:{ scaleMargins:{top:.05,bottom:.05}, borderColor:'#252840' } });
+  rsiSeries = rsiChart.addLineSeries({ color:'#ce93d8', lineWidth:1, priceLineVisible:false, lastValueVisible:true });
+  rsiSeries.createPriceLine({ price:70, color:'#ff3d5780', lineWidth:1, lineStyle:2, axisLabelVisible:true, title:'OB' });
+  rsiSeries.createPriceLine({ price:30, color:'#00e67680', lineWidth:1, lineStyle:2, axisLabelVisible:true, title:'OS' });
+
+  volChart = LightweightCharts.createChart($('vol-chart'), { ...LC_THEME,
+    width: $('vol-chart').clientWidth, height: $('vol-chart').clientHeight || 76,
+    rightPriceScale:{ scaleMargins:{top:.1,bottom:0}, borderColor:'#252840' } });
+  volSeries = volChart.addHistogramSeries({ color:'#2979ff30', priceFormat:{type:'volume'}, priceLineVisible:false });
+
+  // Equity mini-charts
+  for (const id of ['scalping', 'breakout']) {
+    const p = pfx(id);
+    const ec = LightweightCharts.createChart($(`${p}-equity-chart`), { ...LC_THEME,
+      width: $(`${p}-equity-chart`).clientWidth, height: 52,
+      timeScale:{ visible:false, borderVisible:false },
+      rightPriceScale:{ visible:false, borderVisible:false },
+      leftPriceScale:{ visible:false },
+      grid:{ vertLines:{visible:false}, horzLines:{visible:false} },
+      crosshair:{ mode: LightweightCharts.CrosshairMode.Hidden },
+    });
+    equityCharts[id] = ec;
+    equitySeries[id] = ec.addAreaSeries({ lineColor: id==='scalping'?'#2979ff':'#00bcd4', topColor: id==='scalping'?'#2979ff30':'#00bcd430', bottomColor:'transparent', lineWidth:1.5, priceLineVisible:false, lastValueVisible:false });
+  }
+
+  // Sync timescales
+  [priceChart, rsiChart, volChart].forEach((src, i) => {
+    const others = [priceChart, rsiChart, volChart].filter((_, j) => j !== i);
+    src.timeScale().subscribeVisibleLogicalRangeChange(r => {
+      if (isSyncing || !r) return;
+      isSyncing = true;
+      others.forEach(c => c.timeScale().setVisibleLogicalRange(r));
+      isSyncing = false;
+    });
+  });
+
+  // Resize
+  new ResizeObserver(() => {
+    priceChart.applyOptions({ width:$('price-chart').clientWidth, height:$('price-chart').clientHeight });
+    rsiChart.applyOptions({ width:$('rsi-chart').clientWidth, height:$('rsi-chart').clientHeight });
+    volChart.applyOptions({ width:$('vol-chart').clientWidth, height:$('vol-chart').clientHeight });
+    for (const id of ['scalping','breakout']) {
+      equityCharts[id].applyOptions({ width: $(`${pfx(id)}-equity-chart`).clientWidth });
+    }
+  }).observe(document.querySelector('.body'));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Indicator computation (frontend)
+// ═══════════════════════════════════════════════════════════════════
+function computeEMA (closes, period) {
+  if (closes.length < period) return closes.map(() => null);
+  const k = 2/(period+1), out = new Array(period-1).fill(null);
+  let ema = closes.slice(0, period).reduce((a,b) => a+b, 0) / period;
+  out.push(ema);
+  for (let i = period; i < closes.length; i++) { ema = closes[i]*k + ema*(1-k); out.push(ema); }
+  return out;
+}
+function computeVWAP (candles) {
+  let cp=0, cv=0, ld=null;
+  return candles.map(c => {
+    const d = new Date(c.openTime).toISOString().slice(0, 10);
+    if (d !== ld) { cp=0; cv=0; ld=d; }
+    cp += c.close*c.volume; cv += c.volume;
+    return cv > 0 ? cp/cv : null;
+  });
+}
+function computeRSI (closes, period) {
+  if (closes.length <= period) return closes.map(() => null);
+  const out = new Array(period).fill(null);
+  let sg=0, sl=0;
+  for (let i=1; i<=period; i++) { const ch=closes[i]-closes[i-1]; sg+=Math.max(0,ch); sl+=Math.max(0,-ch); }
+  let ag=sg/period, al=sl/period;
+  out.push(al===0?100:100-100/(1+ag/al));
+  for (let i=period+1; i<closes.length; i++) {
+    const ch=closes[i]-closes[i-1];
+    ag=(ag*(period-1)+Math.max(0,ch))/period;
+    al=(al*(period-1)+Math.max(0,-ch))/period;
+    out.push(al===0?100:100-100/(1+ag/al));
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Render candles + overlays
+// ═══════════════════════════════════════════════════════════════════
+function renderCandles (candles) {
+  if (!candles || !candles.length) return;
+  const closes = candles.map(c => c.close);
+  const emaF   = computeEMA(closes, 8);
+  const emaS   = computeEMA(closes, 21);
+  const ema50  = computeEMA(closes, 50);
+  const vwapA  = computeVWAP(candles);
+  const rsiA   = computeRSI(closes, 14);
+  const ts     = c => Math.floor(c.openTime / 1000);
+
+  candleSeries.setData(candles.map(c => ({ time:ts(c), open:c.open, high:c.high, low:c.low, close:c.close })));
+  emaFastSeries.setData(candles.map((c,i) => emaF[i]  != null ? { time:ts(c), value:emaF[i]  } : null).filter(Boolean));
+  emaSlowSeries.setData(candles.map((c,i) => emaS[i]  != null ? { time:ts(c), value:emaS[i]  } : null).filter(Boolean));
+  ema50Series.setData(candles.map((c,i)   => ema50[i] != null ? { time:ts(c), value:ema50[i] } : null).filter(Boolean));
+  vwapSeries.setData(candles.map((c,i)    => vwapA[i] != null ? { time:ts(c), value:vwapA[i] } : null).filter(Boolean));
+  rsiSeries.setData(candles.map((c,i)     => rsiA[i]  != null ? { time:ts(c), value:rsiA[i]  } : null).filter(Boolean));
+  volSeries.setData(candles.map(c => ({ time:ts(c), value:c.volume, color:c.close>=c.open?'#00e67630':'#ff3d5730' })));
+
+  // Reapply markers for both strategies
+  for (const id of ['scalping','breakout']) {
+    if (S[id].markers.length) candleSeries.setMarkers(getAllMarkers());
+  }
+
+  priceChart.timeScale().scrollToRealTime();
+  rsiChart.timeScale().scrollToRealTime();
+  volChart.timeScale().scrollToRealTime();
+}
+
+function onCandleTick (c) {
+  const t = Math.floor(c.openTime / 1000);
+  candleSeries.update({ time:t, open:c.open, high:c.high, low:c.low, close:c.close });
+  volSeries.update({ time:t, value:c.volume, color:c.close>=c.open?'#00e67630':'#ff3d5730' });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Chart markers (merged from both strategies)
+// ═══════════════════════════════════════════════════════════════════
+function getAllMarkers () {
+  return [...S.scalping.markers, ...S.breakout.markers].sort((a,b) => a.time - b.time);
+}
+
+function addMarker (id, ts, type, pnl) {
+  const isL  = type === 'long';
+  const color = id === 'scalping'
+    ? (pnl == null ? '#2979ff' : (pnl > 0 ? '#00e676' : '#ff3d57'))
+    : (pnl == null ? '#00bcd4' : (pnl > 0 ? '#00e676' : '#ff3d57'));
+  S[id].markers.push({
+    time:     Math.floor(ts / 1000),
+    position: isL ? 'belowBar' : 'aboveBar',
+    color,
+    shape:    pnl == null ? (isL ? 'arrowUp' : 'arrowDown') : 'circle',
+    text:     pnl == null ? '' : (pnl > 0 ? '+$'+pnl.toFixed(0) : '$'+pnl.toFixed(0)),
+  });
+  S[id].markers.sort((a,b) => a.time - b.time);
+  candleSeries.setMarkers(getAllMarkers());
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Position price lines
+// ═══════════════════════════════════════════════════════════════════
+function clearPositionLines (id) {
+  if (S[id].slLine)    { candleSeries.removePriceLine(S[id].slLine);    S[id].slLine    = null; }
+  if (S[id].tpLine)    { candleSeries.removePriceLine(S[id].tpLine);    S[id].tpLine    = null; }
+  if (S[id].entryLine) { candleSeries.removePriceLine(S[id].entryLine); S[id].entryLine = null; }
+}
+
+function renderPosition (id, pos) {
+  const p = pfx(id);
+  clearPositionLines(id);
+
+  if (!pos) {
+    $(`${p}-pos`).innerHTML = '<div class="pos-empty">No active position</div>';
+    return;
+  }
+
+  const lineColor = id === 'scalping' ? '#2979ff' : '#00bcd4';
+  S[id].entryLine = candleSeries.createPriceLine({ price:pos.entry,   color:lineColor, lineWidth:1, lineStyle:0, title:`ENTRY(${id==='scalping'?'EMA':'BRK'})` });
+  S[id].slLine    = candleSeries.createPriceLine({ price:pos.trailSl, color:'#ff3d57', lineWidth:1, lineStyle:2, title:`SL(${id==='scalping'?'E':'B'})` });
+  S[id].tpLine    = candleSeries.createPriceLine({ price:pos.tp,      color:'#00e676', lineWidth:1, lineStyle:2, title:`TP(${id==='scalping'?'E':'B'})` });
+
+  let unreal = 0, unrealPct = 0;
+  if (currentTicker) {
+    const price = currentTicker.price;
+    unreal    = pos.type === 'long' ? (price - pos.entry)*pos.qty : (pos.entry - price)*pos.qty;
+    unrealPct = unreal / (pos.entry * pos.qty) * 100;
+  }
+  const cls   = pos.type === 'long' ? 'pos-long' : 'pos-short';
+  const lbl   = pos.type === 'long' ? '▲ LONG' : '▼ SHORT';
+  const uCls  = unreal >= 0 ? 'pos-text' : 'neg-text';
+  const slD   = ((Math.abs(pos.entry - pos.trailSl) / pos.entry) * 100).toFixed(2);
+  const tpD   = ((Math.abs(pos.tp - pos.entry) / pos.entry) * 100).toFixed(2);
+
+  $(`${p}-pos`).innerHTML = `
+    <div class="pos-badge ${cls}">${lbl}</div>
+    <div class="pos-grid">
+      <div class="pos-row"><span class="pos-lbl">Entry</span><span class="pos-val">$${pos.entry.toFixed(2)}</span></div>
+      <div class="pos-row"><span class="pos-lbl">Qty</span><span class="pos-val">${pos.qty.toFixed(5)}</span></div>
+      <div class="pos-row"><span class="pos-lbl">Trail SL</span><span class="pos-val neg-text">$${pos.trailSl.toFixed(2)} <small>(${slD}%)</small></span></div>
+      <div class="pos-row"><span class="pos-lbl">TP</span><span class="pos-val pos-text">$${pos.tp.toFixed(2)} <small>(+${tpD}%)</small></span></div>
+      <div class="pos-row" style="grid-column:1/-1">
+        <span class="pos-lbl">Unrealized P&L</span>
+        <span class="pos-val ${uCls}">${unreal>=0?'+':''}${fmtUSD(unreal)} (${unrealPct.toFixed(2)}%)</span>
+      </div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Stats panel
+// ═══════════════════════════════════════════════════════════════════
+function applyStats (id, s) {
+  S[id].state = s;
+  const p = pfx(id);
+
+  $(`${p}-m-pnl`).innerHTML   = `<span class="${s.totalPnl>=0?'pos-text':'neg-text'}">${s.totalPnl>=0?'+':''}${fmtUSD(s.totalPnl)}</span>`;
+  $(`${p}-m-ret`).innerHTML   = `<span class="${s.totalReturn>=0?'pos-text':'neg-text'}">${fmtPct(s.totalReturn)}</span>`;
+  $(`${p}-m-wr`).textContent  = s.totalTrades ? s.winRate.toFixed(1)+'%' : '—';
+  $(`${p}-m-pf`).textContent  = s.profitFactor===Infinity?'∞':s.profitFactor>0?s.profitFactor.toFixed(2):'—';
+  $(`${p}-m-trades`).textContent = s.totalTrades;
+  $(`${p}-m-wl`).innerHTML    = `<span class="pos-text">${s.winCount}</span>/<span class="neg-text">${s.lossCount}</span>`;
+  $(`${p}-m-day`).innerHTML   = `<span class="${s.dayPnl>=0?'pos-text':'neg-text'}">${s.dayPnl>=0?'+':''}${fmtUSD(s.dayPnl)}</span>`;
+
+  let st = S[id].running
+    ? (S[id].paused ? '⏸ Paused' : (s.warmedUp ? (s.dayTradeStopped?'⛔ Day limit':'🟢 Live') : '⏳ Warming'))
+    : '⏹ Stopped';
+  $(`${p}-m-status`).textContent = st;
+
+  renderPosition(id, s.position);
+
+  if (s.recentTrades) rebuildTradeLog(id, s.recentTrades);
+  if (s.equityHistory?.length > 1)
+    equitySeries[id].setData(s.equityHistory.map(e => ({ time: Math.floor(e.time/1000), equity: e.equity })));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Session info panel
+// ═══════════════════════════════════════════════════════════════════
+function applySessionInfo (id, info) {
+  if (!info) return;
+  const p = pfx(id);
+  const running = info.isRunning, paused = info.paused;
+  let badge;
+  if (!running) badge = '<span class="sess-badge sess-stopped">⏹ STOPPED</span>';
+  else if (paused) badge = '<span class="sess-badge sess-paused">⏸ PAUSED</span>';
+  else badge = '<span class="sess-badge sess-running">🟢 RUNNING</span>';
+  $(`${p}-sess-badge`).innerHTML = badge;
+  $(`${p}-sess-id`).textContent   = info.shortId || '—';
+  $(`${p}-sess-cap`).innerHTML    = `${fmtUSD(info.currentCapital)} <span style="color:var(--muted);font-size:10px">(${fmtUSD(info.initialCapital)})</span>`;
+  $(`${p}-sess-risk`).textContent = (info.riskPerTradePct || 2) + '%';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Bot status header dots
+// ═══════════════════════════════════════════════════════════════════
+function updateStratStatus (id, status) {
+  const p   = pfx(id);
+  S[id].running  = status.running;
+  S[id].paused   = status.paused;
+  S[id].warmedUp = status.warmedUp;
+
+  const dotId = id === 'scalping' ? 'scalp-dot' : 'brk-dot';
+  const lblId = id === 'scalping' ? 'scalp-label' : 'brk-label';
+  const dot = $(dotId), lbl = $(lblId);
+
+  if (status.running && !status.paused) {
+    dot.className   = status.warmedUp ? 'dot dot-green' : 'dot dot-yellow';
+    lbl.textContent = status.warmedUp ? 'LIVE' : 'WARMING';
+    lbl.style.color = status.warmedUp ? 'var(--green)' : 'var(--yellow)';
+  } else if (status.running && status.paused) {
+    dot.className   = 'dot dot-yellow';
+    lbl.textContent = 'PAUSED';
+    lbl.style.color = 'var(--yellow)';
+  } else {
+    dot.className   = 'dot dot-red';
+    lbl.textContent = 'STOPPED';
+    lbl.style.color = 'var(--muted)';
+  }
+
+  // Button states
+  $(`${p}-btn-start`).disabled  = status.running && !status.paused;
+  $(`${p}-btn-stop`).disabled   = !status.running;
+  $(`${p}-btn-pause`).disabled  = !status.running || status.paused;
+  $(`${p}-btn-resume`).disabled = !status.running || !status.paused;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Trade log
+// ═══════════════════════════════════════════════════════════════════
+function rebuildTradeLog (id, trades) {
+  const p = pfx(id);
+  $(`${p}-trade-count`).textContent = `${trades.length} trade${trades.length!==1?'s':''}`;
+  $(`${p}-trade-tbody`).innerHTML = trades.slice(0, 80).map(t => {
+    const pCls  = t.pnl >= 0 ? 'pos-text' : 'neg-text';
+    const typB  = `<span class="badge badge-${t.type}">${t.type.toUpperCase()}</span>`;
+    const exitB = t.reason === 'take_profit' ? '<span class="badge badge-tp">TP</span>'
+                : t.reason === 'stop_loss'   ? '<span class="badge badge-sl">SL</span>'
+                : `<span class="badge badge-misc">${t.reason.slice(0,6)}</span>`;
+    return `<tr>
+      <td>${t.id}</td><td>${typB}</td>
+      <td>$${t.entry.toFixed(1)}</td><td>$${t.exit.toFixed(1)}</td>
+      <td class="${pCls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</td>
+      <td class="${pCls}">${t.pnlPct.toFixed(2)}%</td>
+      <td>${exitB}</td>
+      <td style="color:var(--muted)">${fmtDT(t.exitTime)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Sessions list
+// ═══════════════════════════════════════════════════════════════════
+function renderSessionsList (sessions) {
+  $('sessions-tbody').innerHTML = sessions.map(s => {
+    const pCls  = s.pnl >= 0 ? 'pos-text' : 'neg-text';
+    const sBadge = s.isRunning
+      ? '<span class="badge badge-active">LIVE</span>'
+      : '<span class="badge badge-inactive">END</span>';
+    const strat = (s.strategyType || 'scalping') === 'scalping'
+      ? '<span class="badge badge-scalp">EMA</span>'
+      : '<span class="badge badge-break">BRK</span>';
+    const wr = s.tradeCount ? ((s.winCount / s.tradeCount) * 100).toFixed(0) + '%' : '—';
+    return `<tr>
+      <td>${strat}</td>
+      <td style="font-size:9px;color:var(--muted)">${s.shortId}</td>
+      <td>${sBadge}</td>
+      <td>$${s.currentCapital.toFixed(0)}</td>
+      <td class="${pCls}">${s.pnl>=0?'+':''}$${s.pnl.toFixed(0)}</td>
+      <td>${s.tradeCount}</td>
+      <td>${wr}</td>
+      <td style="color:var(--muted);font-size:9px">${fmtDT(new Date(s.startedAt))}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Activity log
+// ═══════════════════════════════════════════════════════════════════
+function addLog ({ level, msg, time }) {
+  const el = document.createElement('div');
+  el.className = 'log-line';
+  el.innerHTML = `<span class="log-time">${fmtTime(time || Date.now())}</span><span class="log-msg log-${level}">${msg}</span>`;
+  const b = $('log-body');
+  b.insertBefore(el, b.firstChild);
+  while (b.children.length > 300) b.removeChild(b.lastChild);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Header ticker
+// ═══════════════════════════════════════════════════════════════════
+function applyTicker (t) {
+  currentTicker = t;
+  $('hd-price').textContent = '$' + t.price.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  $('hd-price').style.color = t.change24h >= 0 ? 'var(--green)' : 'var(--red)';
+  $('hd-chg').textContent   = (t.change24h >= 0 ? '+' : '') + t.change24h.toFixed(2) + '%';
+  $('hd-chg').style.color   = t.change24h >= 0 ? 'var(--green)' : 'var(--red)';
+  $('hd-high').textContent  = '$' + t.high24h.toLocaleString('en-US', { maximumFractionDigits:0 });
+  $('hd-low').textContent   = '$' + t.low24h.toLocaleString('en-US', { maximumFractionDigits:0 });
+  $('hd-vol').textContent   = t.volume24h.toFixed(0) + ' BTC';
+  // Refresh unrealized P&L on both positions
+  for (const id of ['scalping','breakout']) {
+    if (S[id].state?.position) renderPosition(id, S[id].state.position);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Controls
+// ═══════════════════════════════════════════════════════════════════
+function toggleNewForm (id, open) {
+  const p = pfx(id);
+  $(`${p}-new-form`).classList.toggle('open', open);
+}
+
+async function stratStart (id) {
+  await fetch(`/api/strategy/${id}/start`, { method:'POST' });
+}
+async function stratStop (id) {
+  await fetch(`/api/strategy/${id}/stop`, { method:'POST' });
+}
+function stratPause (id) {
+  fetch(`/api/strategy/${id}/pause`, { method:'POST' });
+}
+function stratResume (id) {
+  fetch(`/api/strategy/${id}/resume`, { method:'POST' });
+}
+async function stratReset (id) {
+  if (!confirm(`Reset ${id} strategy? This will stop it and clear the current session link.`)) return;
+  await fetch(`/api/strategy/${id}/reset`, { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+}
+async function newSession (id) {
+  const p = pfx(id);
+  const capital = +$(`${p}-inp-cap`).value  || 10000;
+  const risk    = +$(`${p}-inp-risk`).value || 2;
+  toggleNewForm(id, false);
+  S[id].markers = [];
+  candleSeries.setMarkers(getAllMarkers());
+  equitySeries[id].setData([]);
+  await fetch(`/api/strategy/${id}/new`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ capital, risk }),
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Tabs
+// ═══════════════════════════════════════════════════════════════════
+function switchTab (name) {
+  ['log','sessions'].forEach(t => {
+    $(`tab-${t}`).classList.toggle('active', t === name);
+    $(`tab-btn-${t}`).classList.toggle('active', t === name);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Socket.IO events
+// ═══════════════════════════════════════════════════════════════════
+socket.on('ticker',        applyTicker);
+socket.on('candles',       renderCandles);
+socket.on('candle_tick',   onCandleTick);
+socket.on('log',           addLog);
+socket.on('sessions_list', renderSessionsList);
+
+socket.on('ws_status', s => {
+  $('ws-kline').className  = s.kline  ? 'ws-on' : 'ws-off';
+  $('ws-ticker').className = s.ticker ? 'ws-on' : 'ws-off';
+});
+
+// all_status — { scalping: {running,paused,warmedUp}, breakout: {...} }
+socket.on('all_status', status => {
+  for (const [id, s] of Object.entries(status)) updateStratStatus(id, s);
+});
+
+// Per-strategy namespaced events
+for (const id of ['scalping', 'breakout']) {
+  socket.on(`${id}:status`,       s   => updateStratStatus(id, s));
+  socket.on(`${id}:stats`,        s   => applyStats(id, s));
+  socket.on(`${id}:session_info`, inf => applySessionInfo(id, inf));
+  socket.on(`${id}:warmed_up`,    ()  => updateStratStatus(id, { ...S[id], warmedUp: true }));
+  socket.on(`${id}:position_opened`, pos   => addMarker(id, pos.entryTime, pos.type, null));
+  socket.on(`${id}:trade_closed`,    trade => addMarker(id, trade.exitTime, trade.type, trade.pnl));
+  socket.on(`${id}:equity_history`,  pts   => {
+    if (pts.length) equitySeries[id].setData(pts.map(p => ({ time:p.time, value:p.equity })));
+  });
+  socket.on(`${id}:equity_point`, pt => {
+    equitySeries[id].update({ time: pt.time, value: pt.equity });
+  });
+}
+
+socket.on('disconnect', () => addLog({ level:'error', msg:'⚡ Disconnected from server...', time:Date.now() }));
+socket.on('connect',    () => addLog({ level:'success', msg:'⚡ Reconnected to server', time:Date.now() }));
+
+// ═══════════════════════════════════════════════════════════════════
+//  Init
+// ═══════════════════════════════════════════════════════════════════
+window.addEventListener('load', () => {
+  initCharts();
+  addLog({ level:'info', msg:'📊 Dual-strategy dashboard ready', time:Date.now() });
+});
+</script>
+</body>
+</html>

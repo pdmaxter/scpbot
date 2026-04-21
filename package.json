@@ -1,0 +1,20 @@
+{
+  "name": "btc-scalping-bot",
+  "version": "2.0.0",
+  "description": "BTC Scalping Bot — Persistent 24/7 Server-Side Engine + MongoDB + Real-time Dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev":   "node --watch server.js"
+  },
+  "dependencies": {
+    "dotenv":    "^16.4.5",
+    "express":   "^4.18.2",
+    "mongoose":  "^8.3.4",
+    "socket.io": "^4.7.4",
+    "ws":        "^8.16.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
