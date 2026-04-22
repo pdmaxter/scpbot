@@ -8,6 +8,10 @@ class PineScriptStrategy extends EventEmitter {
     this.initialCapital = cfg.capital || 10000;
     this.capital = this.initialCapital;
     this.riskPerTrade = (cfg.riskPerTradePct || 2) / 100;
+    this.lotSize = Math.max(1, Math.round(Number(cfg.lotSize ?? 1) || 1));
+    this.positionSizePct = Number(cfg.positionSizePct ?? 0) / 100;
+    this.minProfitBookingPct = Number(cfg.minProfitBookingPct ?? 0.5) / 100;
+    this.profitRatioBooking = Number(cfg.profitRatioBooking ?? 1.67);
     this.dailyProfitTarget = (cfg.dailyProfitPct || 20) / 100;
     this.dailyProfitHardCap = (cfg.dailyHardCapPct || 30) / 100;
     this.maxDailyLoss = (cfg.maxDailyLossPct || 10) / 100;
@@ -130,14 +134,14 @@ class PineScriptStrategy extends EventEmitter {
     if (!this.code.trim()) return this._state();
     if (this.lastSignals.long) {
       const sl = close - atr * this.atrSlMult;
-      const tp = close + atr * this.atrTpMult;
       const rpu = close - sl;
-      if (rpu > 0) this._openPos('long', close, sl, tp, this.capital * effRisk / rpu, openTime);
+      const tp = Math.max(close + rpu * this.profitRatioBooking, close * (1 + this.minProfitBookingPct));
+      if (rpu > 0) this._openPos('long', close, sl, tp, this._positionQty(close, rpu, effRisk), openTime);
     } else if (this.lastSignals.short) {
       const sl = close + atr * this.atrSlMult;
-      const tp = close - atr * this.atrTpMult;
       const rpu = sl - close;
-      if (rpu > 0) this._openPos('short', close, sl, tp, this.capital * effRisk / rpu, openTime);
+      const tp = Math.min(close - rpu * this.profitRatioBooking, close * (1 - this.minProfitBookingPct));
+      if (rpu > 0) this._openPos('short', close, sl, tp, this._positionQty(close, rpu, effRisk), openTime);
     }
     return this._state();
   }
@@ -167,6 +171,10 @@ class PineScriptStrategy extends EventEmitter {
     this.capital = cfg.capital || this.initialCapital;
     this.initialCapital = this.capital;
     if (cfg.riskPerTradePct) this.riskPerTrade = cfg.riskPerTradePct / 100;
+    if (cfg.lotSize !== undefined) this.lotSize = Math.max(1, Math.round(Number(cfg.lotSize) || 1));
+    if (cfg.positionSizePct !== undefined) this.positionSizePct = Math.max(0, Number(cfg.positionSizePct) || 0) / 100;
+    if (cfg.minProfitBookingPct !== undefined) this.minProfitBookingPct = Math.max(0, Number(cfg.minProfitBookingPct) || 0) / 100;
+    if (cfg.profitRatioBooking !== undefined) this.profitRatioBooking = Math.max(0.1, Number(cfg.profitRatioBooking) || 1.67);
     this.resetState();
   }
 
@@ -187,8 +195,14 @@ class PineScriptStrategy extends EventEmitter {
 
   _utcDate (tsMs) { return new Date(tsMs).toISOString().slice(0, 10); }
 
+  _positionQty (entry, riskPerUnit, effRisk) {
+    if (this.lotSize > 0) return this.lotSize;
+    if (this.positionSizePct > 0) return this.capital * this.positionSizePct / entry;
+    return this.capital * effRisk / riskPerUnit;
+  }
+
   _openPos (type, entry, sl, tp, qty, time) {
-    this.position = { type, entry, sl, tp, trailSl: sl, qty, entryTime: time };
+    this.position = { type, entry, sl, tp, trailSl: sl, qty, lotSize: this.lotSize, entryTime: time };
     this.emit('position_opened', { ...this.position });
   }
 
@@ -230,6 +244,12 @@ class PineScriptStrategy extends EventEmitter {
         shortSignal: this.lastSignals.short,
         scriptName: this.scriptName,
         hasScript: Boolean(this.code.trim()),
+      },
+      settings: {
+        lotSize: this.lotSize,
+        positionSizePct: this.positionSizePct * 100,
+        minProfitBookingPct: this.minProfitBookingPct * 100,
+        profitRatioBooking: this.profitRatioBooking,
       },
       totalTrades: this.trades.length,
       winCount: wins.length,

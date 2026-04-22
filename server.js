@@ -8,17 +8,21 @@ const { Server } = require('socket.io');
 const path       = require('path');
 const crypto     = require('crypto');
 
-const db                             = require('./db');
-const { Session, PineScriptConfig }          = db;
+const db                                      = require('./db');
+const { Session, PineScriptConfig, Trade, Position, ExchangeOrder, ExchangeCredential } = db;
 const { BotManager, StrategyRunner }         = require('./bot-manager');
 const { ScalpingStrategy }                   = require('./strategies/scalping');
 const { RangeBreakoutStrategy }              = require('./strategies/breakout');
 const { HeikenAshiSupertrendStrategy }       = require('./strategies/heikenashi_supertrend');
 const { PineScriptStrategy }                 = require('./strategies/pine_adapter');
+const { DeltaDemoClient }                    = require('./delta-exchange');
 
 const SYMBOL_REST = 'BTCUSDT';
 const INTERVAL_REST = '5m';
 const CANDLE_MS = 5 * 60 * 1000;
+const EXCHANGE_PROVIDERS = [
+  { provider: 'delta-demo', name: 'Delta Exchange Demo' },
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Auth config  (set via .env)
@@ -133,7 +137,7 @@ app.post('/login', express.urlencoded({ extended: false }), (req, res) => {
     const token = createSession();
     res.setHeader('Set-Cookie', sessionCookie(token));
     console.log(`[AUTH] Login OK — ${email}`);
-    return res.redirect('/');
+    return res.redirect('/pine.html');
   }
 
   console.warn(`[AUTH] Failed login attempt — email: ${email}`);
@@ -161,6 +165,8 @@ function requireAuth (req, res, next) {
 }
 
 app.use(requireAuth);
+app.get(['/', '/index.html'], (_req, res) => res.redirect('/pine.html'));
+app.get('/positions.html', (_req, res) => res.redirect('/pine.html'));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '1mb' }));
 
@@ -177,11 +183,19 @@ io.use((socket, next) => {
 //  BotManager + runners
 // ─────────────────────────────────────────────────────────────────────────────
 const manager = new BotManager(io);
+const deltaClient = new DeltaDemoClient(process.env);
 
-const scalpRunner    = new StrategyRunner('scalping',    new ScalpingStrategy({ capital: 10000, riskPerTradePct: 2 }), io);
-const breakoutRunner = new StrategyRunner('breakout',    new RangeBreakoutStrategy({ capital: 10000, riskPerTradePct: 2 }), io);
-const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertrendStrategy({ capital: 10000, riskPerTradePct: 2 }), io);
+const scalpRunner    = new StrategyRunner('scalping',    new ScalpingStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { executionAdapter: deltaClient, displayName: 'EMA Scalping', onExchangeOrder: queueExchangeOrderSync });
+const breakoutRunner = new StrategyRunner('breakout',    new RangeBreakoutStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { executionAdapter: deltaClient, displayName: 'Range Breakout', onExchangeOrder: queueExchangeOrderSync });
+const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertrendStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { executionAdapter: deltaClient, displayName: 'Heikin-Ashi SuperTrend', onExchangeOrder: queueExchangeOrderSync });
 const pineRunners    = new Map(); // scriptId -> StrategyRunner
+const EXCHANGE_SYNC_INTERVAL_MS = 30 * 1000;
+const STRATEGY_WATCHDOG_INTERVAL_MS = 30 * 1000;
+let exchangeSyncTimer = null;
+let exchangeSyncInFlight = false;
+let latestExchangeSync = null;
+let strategyWatchdogTimer = null;
+let exchangeOrderSyncTimer = null;
 
 manager.addRunner(scalpRunner);
 manager.addRunner(breakoutRunner);
@@ -205,6 +219,7 @@ async function startRunner (runner, opts = {}) {
   const sessInfo = await runner.buildSessionInfo().catch(() => null);
   if (sessInfo) io.emit(`${runner.id}:session_info`, sessInfo);
   await manager.sendSessionsList(io);
+  startBackendExchangeSync();
 }
 
 function fetchJson (url) {
@@ -293,6 +308,14 @@ function pineListItem (doc) {
     name: doc.name,
     isActive: Boolean(doc.isActive || doc.key === 'active'),
     meta: doc.meta || {},
+    capital: doc.capital || 10000,
+    riskPerTradePct: doc.riskPerTradePct || 2,
+    lotSize: doc.lotSize || 1,
+    positionSizePct: doc.positionSizePct ?? 10,
+    minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
+    profitRatioBooking: doc.profitRatioBooking ?? 1.67,
+    exchangeEnabled: Boolean(doc.exchangeEnabled),
+    exchangeProvider: doc.exchangeProvider || 'delta-demo',
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -367,9 +390,18 @@ function ensurePineRunner (doc) {
   if (!runner) {
     runner = new StrategyRunner(
       pineRunnerId(scriptId),
-      new PineScriptStrategy({ name: doc.name, code: doc.code, capital: 10000, riskPerTradePct: 2 }),
+      new PineScriptStrategy({
+        name: doc.name,
+        code: doc.code,
+        capital: doc.capital || 10000,
+        riskPerTradePct: doc.riskPerTradePct || 2,
+        lotSize: doc.lotSize || 1,
+        positionSizePct: doc.positionSizePct ?? 10,
+        minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
+        profitRatioBooking: doc.profitRatioBooking ?? 1.67,
+      }),
       io,
-      { sessionStrategyType: 'pine', pineScriptId: scriptId, displayName: doc.name }
+      { sessionStrategyType: 'pine', pineScriptId: scriptId, displayName: doc.name, executionAdapter: deltaClient, executionEnabled: Boolean(doc.exchangeEnabled), lotSize: doc.lotSize || 1, onExchangeOrder: queueExchangeOrderSync }
     );
     pineRunners.set(scriptId, runner);
     manager.addRunner(runner);
@@ -377,6 +409,8 @@ function ensurePineRunner (doc) {
     runner.wire();
   } else {
     runner.displayName = doc.name;
+    runner.executionEnabled = Boolean(doc.exchangeEnabled);
+    runner.lotSize = doc.lotSize || 1;
     if (!runner.running) runner.strategy.setScript({ name: doc.name, code: doc.code });
     runner.wire();
   }
@@ -387,7 +421,20 @@ async function setActivePineScript (doc) {
   doc.isActive = true;
   await doc.save();
   const runner = ensurePineRunner(doc);
-  io.emit('pine:config', { id: doc._id.toString(), name: doc.name, code: doc.code, meta: runner.strategy.scriptMeta() });
+  io.emit('pine:config', {
+    id: doc._id.toString(),
+    name: doc.name,
+    code: doc.code,
+    meta: runner.strategy.scriptMeta(),
+    capital: doc.capital || 10000,
+    riskPerTradePct: doc.riskPerTradePct || 2,
+    lotSize: doc.lotSize || 1,
+    positionSizePct: doc.positionSizePct ?? 10,
+    minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
+    profitRatioBooking: doc.profitRatioBooking ?? 1.67,
+    exchangeEnabled: Boolean(doc.exchangeEnabled),
+    exchangeProvider: doc.exchangeProvider || 'delta-demo',
+  });
   await emitPineState();
   return runner;
 }
@@ -395,6 +442,230 @@ async function setActivePineScript (doc) {
 async function listPineScripts () {
   const docs = await PineScriptConfig.find().sort({ isActive: -1, updatedAt: -1 }).lean();
   return docs.map(pineListItem);
+}
+
+function applyPineRuntimeOptions (doc, body = {}) {
+  if (body.capital !== undefined) doc.capital = +body.capital || doc.capital || 10000;
+  if (body.risk !== undefined) doc.riskPerTradePct = +body.risk || doc.riskPerTradePct || 2;
+  if (body.riskPerTradePct !== undefined) doc.riskPerTradePct = +body.riskPerTradePct || doc.riskPerTradePct || 2;
+  if (body.lotSize !== undefined) doc.lotSize = Math.max(1, Math.round(+body.lotSize || 1));
+  if (body.positionSizePct !== undefined) doc.positionSizePct = Math.max(0, +body.positionSizePct || 0);
+  if (body.minProfitBookingPct !== undefined) doc.minProfitBookingPct = Math.max(0, +body.minProfitBookingPct || 0);
+  if (body.profitRatioBooking !== undefined) doc.profitRatioBooking = Math.max(0.1, +body.profitRatioBooking || 1.67);
+  if (body.exchangeEnabled !== undefined) doc.exchangeEnabled = Boolean(body.exchangeEnabled);
+  if (body.exchangeProvider !== undefined && providerMeta(String(body.exchangeProvider))) {
+    doc.exchangeProvider = String(body.exchangeProvider);
+  } else if (!doc.exchangeProvider) {
+    doc.exchangeProvider = 'delta-demo';
+  }
+}
+
+function pineStrategyOptions (doc) {
+  return {
+    capital: doc.capital || 10000,
+    riskPerTradePct: doc.riskPerTradePct || 2,
+    lotSize: doc.lotSize || 1,
+    positionSizePct: doc.positionSizePct ?? 10,
+    minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
+    profitRatioBooking: doc.profitRatioBooking ?? 1.67,
+  };
+}
+
+const STRATEGY_LABELS = {
+  scalping: 'EMA Scalping',
+  breakout: 'Range Breakout',
+  heikenashi: 'Heikin-Ashi SuperTrend',
+  pine: 'Pine Strategy',
+};
+
+function idString (value) {
+  return value?.toString?.() || (value ? String(value) : null);
+}
+
+function exchangeSecretKey () {
+  return crypto
+    .createHash('sha256')
+    .update(process.env.EXCHANGE_KEY_SECRET || DASHBOARD_PWD || process.env.MONGO_URI || 'scpbot-local-key')
+    .digest();
+}
+
+function encryptExchangeSecret (value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', exchangeSecretKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [iv.toString('base64'), tag.toString('base64'), encrypted.toString('base64')].join(':');
+}
+
+function decryptExchangeSecret (payload) {
+  if (!payload) return '';
+  try {
+    const [ivRaw, tagRaw, encryptedRaw] = String(payload).split(':');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', exchangeSecretKey(), Buffer.from(ivRaw, 'base64'));
+    decipher.setAuthTag(Buffer.from(tagRaw, 'base64'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(encryptedRaw, 'base64')),
+      decipher.final(),
+    ]).toString('utf8');
+  } catch (e) {
+    return '';
+  }
+}
+
+function maskSecret (value) {
+  const text = String(value || '');
+  if (!text) return '';
+  if (text.length <= 8) return `${text.slice(0, 2)}****${text.slice(-2)}`;
+  return `${text.slice(0, 4)}****${text.slice(-4)}`;
+}
+
+function providerMeta (provider) {
+  return EXCHANGE_PROVIDERS.find(p => p.provider === provider) || null;
+}
+
+function exchangeCredentialView (doc, status) {
+  const apiKey = decryptExchangeSecret(doc?.apiKeyEncrypted);
+  return {
+    provider: doc?.provider || status?.provider || 'delta-demo',
+    name: providerMeta(doc?.provider || status?.provider)?.name || 'Delta Exchange Demo',
+    enabled: Boolean(doc?.enabled ?? status?.enabled),
+    configured: Boolean(apiKey && doc?.apiSecretEncrypted) || Boolean(status?.configured),
+    credentialSource: doc ? 'database' : (status?.credentialSource || 'env'),
+    maskedApiKey: apiKey ? maskSecret(apiKey) : '',
+    baseUrl: doc?.baseUrl || status?.baseUrl || '',
+    productSymbol: doc?.productSymbol || status?.productSymbol || 'BTCUSD',
+    productId: doc?.productId || status?.productId || null,
+    lastError: status?.lastError || null,
+    configuredAt: doc?.configuredAt || doc?.updatedAt || null,
+  };
+}
+
+async function applySavedExchangeCredentials () {
+  const doc = await ExchangeCredential.findOne({ provider: 'delta-demo' }).lean().catch(() => null);
+  if (!doc) return;
+  deltaClient.configure({
+    apiKey: decryptExchangeSecret(doc.apiKeyEncrypted),
+    apiSecret: decryptExchangeSecret(doc.apiSecretEncrypted),
+    baseUrl: doc.baseUrl,
+    productSymbol: doc.productSymbol,
+    productId: doc.productId,
+    enabled: doc.enabled,
+    credentialSource: 'database',
+  });
+}
+
+function strategyNameForSession (session, pineMap) {
+  if (!session) return 'Unknown Strategy';
+  const type = session.strategyType || 'scalping';
+  if (type === 'pine') {
+    const pine = pineMap.get(idString(session.pineScriptId));
+    return pine ? `Pine: ${pine.name}` : 'Pine Strategy';
+  }
+  return STRATEGY_LABELS[type] || type;
+}
+
+function sessionRunnerId (session) {
+  if (!session) return null;
+  if (session.strategyType === 'pine' && session.pineScriptId) return pineRunnerId(idString(session.pineScriptId));
+  return session.strategyType || 'scalping';
+}
+
+function calcUnrealizedPnl (position, markPrice) {
+  if (!position || !Number.isFinite(markPrice)) return { pnl: null, pnlPct: null };
+  const pnl = position.type === 'short'
+    ? (position.entry - markPrice) * position.qty
+    : (markPrice - position.entry) * position.qty;
+  return {
+    pnl,
+    pnlPct: position.entry && position.qty ? pnl / (position.entry * position.qty) * 100 : null,
+  };
+}
+
+async function runBackendExchangeSync (reason = 'timer') {
+  if (!deltaClient.status().enabled || exchangeSyncInFlight) return latestExchangeSync;
+  exchangeSyncInFlight = true;
+  try {
+    const sync = await deltaClient.syncAccount({ pageSize: 50 });
+    latestExchangeSync = {
+      ...sync,
+      reason,
+      runningBots: Object.values(manager.runners).filter(r => r.running).length,
+    };
+    io.emit('exchange:sync', {
+      provider: latestExchangeSync.provider,
+      productSymbol: latestExchangeSync.product?.symbol || deltaClient.status().productSymbol,
+      syncedAt: latestExchangeSync.syncedAt,
+      openCount: latestExchangeSync.summary?.openCount || 0,
+      closedCount: latestExchangeSync.summary?.closedCount || 0,
+      openPnl: latestExchangeSync.summary?.openPnl || 0,
+      closedPnl: latestExchangeSync.summary?.closedPnl || 0,
+      netPnl: latestExchangeSync.summary?.netPnl || 0,
+      errors: latestExchangeSync.errors || [],
+      reason,
+    });
+    return latestExchangeSync;
+  } catch (err) {
+    deltaClient.lastError = err.message;
+    latestExchangeSync = {
+      provider: 'delta-demo',
+      syncedAt: new Date().toISOString(),
+      reason,
+      errors: [err.message],
+      summary: { openCount: 0, closedCount: 0, openPnl: 0, closedPnl: 0, netPnl: 0 },
+    };
+    io.emit('exchange:sync', latestExchangeSync);
+    console.error('[DELTA] Background sync failed:', err.message);
+    return latestExchangeSync;
+  } finally {
+    exchangeSyncInFlight = false;
+  }
+}
+
+function startBackendExchangeSync () {
+  if (exchangeSyncTimer || !deltaClient.status().enabled) return;
+  runBackendExchangeSync('boot').catch(() => {});
+  exchangeSyncTimer = setInterval(() => {
+    runBackendExchangeSync('timer').catch(() => {});
+  }, EXCHANGE_SYNC_INTERVAL_MS);
+}
+
+function queueExchangeOrderSync () {
+  if (!deltaClient.status().enabled) return;
+  if (exchangeOrderSyncTimer) clearTimeout(exchangeOrderSyncTimer);
+  exchangeOrderSyncTimer = setTimeout(() => {
+    exchangeOrderSyncTimer = null;
+    runBackendExchangeSync('order').catch(() => {});
+  }, 1500);
+}
+
+function startStrategyWatchdog () {
+  if (strategyWatchdogTimer) return;
+  strategyWatchdogTimer = setInterval(() => {
+    const runningCount = Object.values(manager.runners).filter(r => r.running).length;
+    if (!runningCount) return;
+    manager.ensureWs();
+    startBackendExchangeSync();
+    io.emit('all_status', manager.allStatus());
+  }, STRATEGY_WATCHDOG_INTERVAL_MS);
+}
+
+function backendExchangeSyncStatus () {
+  return {
+    enabled: Boolean(exchangeSyncTimer && deltaClient.status().enabled),
+    inFlight: exchangeSyncInFlight,
+    intervalMs: EXCHANGE_SYNC_INTERVAL_MS,
+    latest: latestExchangeSync
+      ? {
+          syncedAt: latestExchangeSync.syncedAt,
+          reason: latestExchangeSync.reason,
+          runningBots: latestExchangeSync.runningBots || 0,
+          summary: latestExchangeSync.summary || null,
+          errors: latestExchangeSync.errors || [],
+        }
+      : null,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -477,6 +748,302 @@ app.get('/api/strategy/:id/stats', (req, res) => {
   res.json(runner.strategy.getFullState());
 });
 
+app.get('/api/delta/status', (_req, res) => {
+  res.json({ ...deltaClient.status(), backendSync: backendExchangeSyncStatus() });
+});
+
+app.get('/api/exchanges', async (_req, res) => {
+  try {
+    const docs = await ExchangeCredential.find().lean();
+    const docMap = new Map(docs.map(doc => [doc.provider, doc]));
+    res.json({
+      exchanges: EXCHANGE_PROVIDERS.map(meta => exchangeCredentialView(
+        docMap.get(meta.provider),
+        meta.provider === 'delta-demo' ? deltaClient.status() : { provider: meta.provider, enabled: false, configured: false }
+      )),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/exchanges/:provider', async (req, res) => {
+  try {
+    const provider = String(req.params.provider || '').trim();
+    const meta = providerMeta(provider);
+    if (!meta) return res.status(400).json({ error: 'Unsupported exchange provider' });
+
+    const existing = await ExchangeCredential.findOne({ provider }).lean();
+    const body = req.body || {};
+    const apiKeyInput = String(body.apiKey || '').trim();
+    const apiSecretInput = String(body.apiSecret || '').trim();
+    const apiKey = apiKeyInput || decryptExchangeSecret(existing?.apiKeyEncrypted);
+    const apiSecret = apiSecretInput || decryptExchangeSecret(existing?.apiSecretEncrypted);
+    const enabled = Boolean(body.enabled);
+    if (enabled && (!apiKey || !apiSecret)) {
+      return res.status(400).json({ error: 'API key and API secret are required before enabling this exchange' });
+    }
+
+    let baseUrl = String(body.baseUrl || existing?.baseUrl || deltaClient.status().baseUrl || '').trim();
+    if (baseUrl) {
+      try { baseUrl = new URL(baseUrl).toString().replace(/\/$/, ''); }
+      catch (e) { return res.status(400).json({ error: 'Exchange base URL is invalid' }); }
+    }
+    const productSymbol = String(body.productSymbol || existing?.productSymbol || deltaClient.status().productSymbol || 'BTCUSD').trim().toUpperCase();
+    const rawProductId = body.productId !== undefined
+      ? String(body.productId).trim()
+      : (existing?.productId || deltaClient.status().productId || '');
+    const productIdValue = rawProductId ? Number(rawProductId) : null;
+    if (rawProductId && (!Number.isFinite(productIdValue) || productIdValue <= 0)) {
+      return res.status(400).json({ error: 'Product ID must be a positive number' });
+    }
+    const productId = productIdValue ? Math.round(productIdValue) : null;
+
+    const doc = await ExchangeCredential.findOneAndUpdate(
+      { provider },
+      {
+        provider,
+        name: meta.name,
+        enabled,
+        apiKeyEncrypted: encryptExchangeSecret(apiKey),
+        apiSecretEncrypted: encryptExchangeSecret(apiSecret),
+        baseUrl,
+        productSymbol,
+        productId,
+        credentialSource: 'database',
+        configuredAt: new Date(),
+      },
+      { upsert: true, new: true }
+    ).lean();
+
+    await applySavedExchangeCredentials();
+    startBackendExchangeSync();
+    res.json({ ok: true, exchange: exchangeCredentialView(doc, deltaClient.status()) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/positions', async (req, res) => {
+  try {
+    const requestedPineId = req.query.pineScriptId ? String(req.query.pineScriptId) : null;
+    const requestedRunnerId = requestedPineId ? pineRunnerId(requestedPineId) : null;
+    const fromMs = req.query.fromDate ? Date.parse(req.query.fromDate) : null;
+    const toMs = req.query.toDate ? Date.parse(req.query.toDate) : null;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000);
+    const tradeQuery = {};
+    if (Number.isFinite(fromMs) || Number.isFinite(toMs)) {
+      tradeQuery.exitTime = {};
+      if (Number.isFinite(fromMs)) tradeQuery.exitTime.$gte = fromMs;
+      if (Number.isFinite(toMs)) tradeQuery.exitTime.$lte = toMs;
+    }
+
+    const [openDocs, tradeDocs] = await Promise.all([
+      Position.find().sort({ updatedAt: -1 }).lean(),
+      Trade.find(tradeQuery).sort({ exitTime: -1 }).limit(limit).lean(),
+    ]);
+
+    const sessionIds = [...new Set(
+      [...openDocs, ...tradeDocs]
+        .map(item => idString(item.sessionId))
+        .filter(Boolean)
+    )];
+    const sessions = sessionIds.length
+      ? await Session.find({ _id: { $in: sessionIds } }).lean()
+      : [];
+    const sessionMap = new Map(sessions.map(s => [idString(s._id), s]));
+    const pineIds = [...new Set(sessions.map(s => idString(s.pineScriptId)).filter(Boolean))];
+    const pineDocs = pineIds.length
+      ? await PineScriptConfig.find({ _id: { $in: pineIds } }).lean()
+      : [];
+    const pineMap = new Map(pineDocs.map(p => [idString(p._id), p]));
+    const lastCandle = manager.latestCandles[manager.latestCandles.length - 1];
+    const markPrice = manager.currentTicker?.price || lastCandle?.close || null;
+    const botStatus = {
+      all: manager.allStatus(),
+      pine: pineAggregateStatus(),
+      runningCount: Object.values(manager.runners).filter(r => r.running).length,
+    };
+    const exchangeOrders = await ExchangeOrder.find().sort({ createdAt: -1 }).limit(100).lean();
+
+    if (deltaClient.status().enabled) {
+      try {
+        const deltaSync = await deltaClient.syncAccount({ fromMs: Number.isFinite(fromMs) ? fromMs : 0, toMs: Number.isFinite(toMs) ? toMs : 0, pageSize: 50 });
+        latestExchangeSync = {
+          ...deltaSync,
+          reason: req.query.force === '1' ? 'force' : 'api',
+          runningBots: botStatus.runningCount,
+        };
+        const auditByOrder = new Map();
+        const auditByClient = new Map();
+        for (const order of exchangeOrders) {
+          const orderId = order.response?.result?.id || order.response?.id;
+          if (orderId) auditByOrder.set(String(orderId), order);
+          if (order.clientOrderId) auditByClient.set(String(order.clientOrderId), order);
+        }
+        const auditForFill = fill => auditByOrder.get(String(fill?.order_id || '')) || auditByClient.get(String(fill?.client_order_id || '')) || null;
+        const lastOpenAudit = exchangeOrders.find(o => o.action === 'open' && o.status === 'sent');
+        const selectedOpenAudit = requestedRunnerId
+          ? exchangeOrders.find(o => o.action === 'open' && o.status === 'sent' && o.runnerId === requestedRunnerId)
+          : null;
+        const enrichTrade = trade => {
+          const audit = auditForFill(trade.exchange?.openFill) || auditForFill(trade.exchange?.closeFill);
+          return {
+            ...trade,
+            strategyName: audit?.strategyName || trade.strategyName,
+            strategyType: audit?.strategyType || trade.strategyType,
+            runnerId: audit?.runnerId || trade.runnerId,
+            shortId: idString(audit?.sessionId)?.slice(-6).toUpperCase() || null,
+          };
+        };
+        const open = deltaSync.positions.map(p => ({
+          ...p,
+          strategyName: selectedOpenAudit?.strategyName || lastOpenAudit?.strategyName || p.strategyName,
+          strategyType: selectedOpenAudit?.strategyType || lastOpenAudit?.strategyType || p.strategyType,
+          runnerId: selectedOpenAudit?.runnerId || lastOpenAudit?.runnerId || p.runnerId,
+          pineScriptId: idString(selectedOpenAudit?.pineScriptId || lastOpenAudit?.pineScriptId) || null,
+          shortId: idString(selectedOpenAudit?.sessionId || lastOpenAudit?.sessionId)?.slice(-6).toUpperCase() || null,
+          markPrice: p.markPrice || markPrice,
+        }));
+        const closed = deltaSync.trades.map(enrichTrade);
+        const selectedClosed = requestedRunnerId ? closed.filter(t => t.runnerId === requestedRunnerId) : closed;
+        const selectedOpen = requestedRunnerId ? open.filter(p => p.runnerId === requestedRunnerId) : open;
+        const selectedOpenPnl = selectedOpen.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0);
+        const selectedClosedPnl = selectedClosed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
+        return res.json({
+          markPrice,
+          summary: {
+            openCount: open.length,
+            closedCount: closed.length,
+            openPnl: open.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0),
+            closedPnl: closed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0),
+            netPnl: open.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0) + closed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0),
+          },
+          source: 'delta',
+          selected: requestedRunnerId ? {
+            runnerId: requestedRunnerId,
+            pineScriptId: requestedPineId,
+            open: selectedOpen,
+            closed: selectedClosed,
+            summary: {
+              openCount: selectedOpen.length,
+              closedCount: selectedClosed.length,
+              openPnl: selectedOpenPnl,
+              closedPnl: selectedClosedPnl,
+              netPnl: selectedOpenPnl + selectedClosedPnl,
+            },
+          } : null,
+          botStatus,
+          delta: { ...deltaClient.status(), lastSyncAt: deltaSync.syncedAt, syncErrors: deltaSync.errors, backendSync: backendExchangeSyncStatus() },
+          open,
+          closed,
+          exchangeOrders: exchangeOrders.map(o => ({
+            id: idString(o._id),
+            provider: o.provider,
+            action: o.action,
+            status: o.status,
+            runnerId: o.runnerId,
+            strategyType: o.strategyType,
+            strategyName: o.strategyName,
+            positionType: o.positionType,
+            side: o.side,
+            productSymbol: o.productSymbol,
+            size: o.size,
+            requestedQty: o.requestedQty,
+            error: o.error,
+            createdAt: o.createdAt,
+          })),
+        });
+      } catch (syncError) {
+        deltaClient.lastError = syncError.message;
+      }
+    }
+
+    const open = openDocs.map(p => {
+      const session = sessionMap.get(idString(p.sessionId));
+      const pnl = calcUnrealizedPnl(p, markPrice);
+      return {
+        id: idString(p._id),
+        state: 'open',
+        sessionId: idString(p.sessionId),
+        shortId: idString(p.sessionId)?.slice(-6).toUpperCase() || null,
+        strategyType: session?.strategyType || null,
+        strategyName: strategyNameForSession(session, pineMap),
+        runnerId: sessionRunnerId(session),
+        pineScriptId: idString(session?.pineScriptId),
+        type: p.type,
+        entry: p.entry,
+        markPrice,
+        qty: p.qty,
+        sl: p.sl,
+        tp: p.tp,
+        trailSl: p.trailSl,
+        pnl: pnl.pnl,
+        pnlPct: pnl.pnlPct,
+        entryTime: p.entryTime,
+        updatedAt: p.updatedAt,
+      };
+    });
+
+    const closed = tradeDocs.map(t => {
+      const session = sessionMap.get(idString(t.sessionId));
+      return {
+        id: idString(t._id),
+        state: 'closed',
+        sessionId: idString(t.sessionId),
+        shortId: idString(t.sessionId)?.slice(-6).toUpperCase() || null,
+        strategyType: session?.strategyType || null,
+        strategyName: strategyNameForSession(session, pineMap),
+        runnerId: sessionRunnerId(session),
+        pineScriptId: idString(session?.pineScriptId),
+        tradeNum: t.tradeNum,
+        type: t.type,
+        entry: t.entry,
+        exit: t.exit,
+        qty: t.qty,
+        sl: t.sl,
+        tp: t.tp,
+        pnl: t.pnl,
+        pnlPct: t.pnlPct,
+        reason: t.reason,
+        entryTime: t.entryTime,
+        exitTime: t.exitTime,
+      };
+    });
+
+    const openPnl = open.reduce((sum, p) => sum + (Number.isFinite(p.pnl) ? p.pnl : 0), 0);
+    const closedPnl = closed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
+
+    res.json({
+      markPrice,
+      summary: {
+        openCount: open.length,
+        closedCount: closed.length,
+        openPnl,
+        closedPnl,
+        netPnl: openPnl + closedPnl,
+      },
+      source: 'local',
+      botStatus,
+      delta: { ...deltaClient.status(), backendSync: backendExchangeSyncStatus() },
+      open,
+      closed,
+      exchangeOrders: exchangeOrders.map(o => ({
+        id: idString(o._id),
+        provider: o.provider,
+        action: o.action,
+        status: o.status,
+        runnerId: o.runnerId,
+        strategyType: o.strategyType,
+        strategyName: o.strategyName,
+        positionType: o.positionType,
+        side: o.side,
+        productSymbol: o.productSymbol,
+        size: o.size,
+        requestedQty: o.requestedQty,
+        error: o.error,
+        createdAt: o.createdAt,
+      })),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/candles',  (_req, res) => res.json(manager.latestCandles));
 
 app.get('/api/pine/config', async (_req, res) => {
@@ -488,22 +1055,67 @@ app.get('/api/pine/config', async (_req, res) => {
       name: cfg?.name || 'Uploaded Pine',
       code: cfg?.code || '',
       meta: cfg?.meta || runner?.strategy.scriptMeta() || { hasScript: false },
+      capital: cfg?.capital || 10000,
+      riskPerTradePct: cfg?.riskPerTradePct || 2,
+      lotSize: cfg?.lotSize || 1,
+      positionSizePct: cfg?.positionSizePct ?? 10,
+      minProfitBookingPct: cfg?.minProfitBookingPct ?? 0.5,
+      profitRatioBooking: cfg?.profitRatioBooking ?? 1.67,
+      exchangeEnabled: Boolean(cfg?.exchangeEnabled),
+      exchangeProvider: cfg?.exchangeProvider || 'delta-demo',
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/pine/upload', async (req, res) => {
   try {
-    const { name = 'Uploaded Pine', code = '', capital, risk, autoStart = false, setActive = false } = req.body || {};
+    const {
+      name = 'Uploaded Pine',
+      code = '',
+      capital,
+      risk,
+      lotSize = 1,
+      positionSizePct = 0,
+      minProfitBookingPct = 0.5,
+      profitRatioBooking = 1.67,
+      exchangeEnabled = false,
+      exchangeProvider = 'delta-demo',
+      autoStart = false,
+      setActive = false,
+    } = req.body || {};
     if (!code.trim()) return res.status(400).json({ error: 'Pine code is required' });
     if (code.length > 500000) return res.status(400).json({ error: 'Pine code is too large' });
+    if (!providerMeta(String(exchangeProvider))) return res.status(400).json({ error: 'Unsupported exchange provider' });
 
-    const temp = new PineScriptStrategy({ name: String(name).slice(0, 80), code, capital: +capital || 10000, riskPerTradePct: +risk || 2 });
+    const safeCapital = +capital || 10000;
+    const safeRisk = +risk || 2;
+    const safeLotSize = Math.max(1, Math.round(+lotSize || 1));
+    const safePositionSizePct = Math.max(0, +positionSizePct || 0);
+    const safeMinProfitBookingPct = Math.max(0, +minProfitBookingPct || 0);
+    const safeProfitRatioBooking = Math.max(0.1, +profitRatioBooking || 1.67);
+    const temp = new PineScriptStrategy({
+      name: String(name).slice(0, 80),
+      code,
+      capital: safeCapital,
+      riskPerTradePct: safeRisk,
+      lotSize: safeLotSize,
+      positionSizePct: safePositionSizePct,
+      minProfitBookingPct: safeMinProfitBookingPct,
+      profitRatioBooking: safeProfitRatioBooking,
+    });
     const meta = temp.scriptMeta();
     const doc = await PineScriptConfig.create({
       name: temp.scriptName,
       code,
       meta,
+      capital: safeCapital,
+      riskPerTradePct: safeRisk,
+      lotSize: safeLotSize,
+      positionSizePct: safePositionSizePct,
+      minProfitBookingPct: safeMinProfitBookingPct,
+      profitRatioBooking: safeProfitRatioBooking,
+      exchangeEnabled: Boolean(exchangeEnabled),
+      exchangeProvider: String(exchangeProvider),
       isActive: Boolean(setActive || autoStart),
     });
 
@@ -511,8 +1123,12 @@ app.post('/api/pine/upload', async (req, res) => {
     if (setActive || autoStart) {
       runner = await setActivePineScript(doc);
       await runner.reset({
-        ...(capital && { capital: +capital }),
-        ...(risk && { riskPerTradePct: +risk }),
+        capital: safeCapital,
+        riskPerTradePct: safeRisk,
+        lotSize: safeLotSize,
+        positionSizePct: safePositionSizePct,
+        minProfitBookingPct: safeMinProfitBookingPct,
+        profitRatioBooking: safeProfitRatioBooking,
       });
       if (autoStart) await startRunner(runner, { createNew: true });
     } else {
@@ -520,7 +1136,22 @@ app.post('/api/pine/upload', async (req, res) => {
     }
 
     await manager.sendSessionsList(io);
-    res.json({ ok: true, id: doc._id.toString(), runnerId: pineRunnerId(doc._id.toString()), meta, autoStarted: Boolean(autoStart), sessionId: runner?.sessionId || null });
+    res.json({
+      ok: true,
+      id: doc._id.toString(),
+      runnerId: pineRunnerId(doc._id.toString()),
+      meta,
+      capital: safeCapital,
+      riskPerTradePct: safeRisk,
+      lotSize: safeLotSize,
+      positionSizePct: safePositionSizePct,
+      minProfitBookingPct: safeMinProfitBookingPct,
+      profitRatioBooking: safeProfitRatioBooking,
+      exchangeEnabled: Boolean(exchangeEnabled),
+      exchangeProvider: String(exchangeProvider),
+      autoStarted: Boolean(autoStart),
+      sessionId: runner?.sessionId || null,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -546,10 +1177,12 @@ app.post('/api/pine/scripts/:id/activate', async (req, res) => {
   try {
     const doc = await PineScriptConfig.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Pine script not found' });
+    applyPineRuntimeOptions(doc, req.body || {});
     const runner = await setActivePineScript(doc);
-    runner.strategy.reset(req.body || {});
+    runner.executionEnabled = Boolean(doc.exchangeEnabled);
+    runner.strategy.reset(pineStrategyOptions(doc));
     await emitPineState();
-    res.json({ ok: true, id: doc._id.toString(), runnerId: runner.id, meta: runner.strategy.scriptMeta() });
+    res.json({ ok: true, id: doc._id.toString(), runnerId: runner.id, meta: runner.strategy.scriptMeta(), exchangeEnabled: Boolean(doc.exchangeEnabled) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -569,9 +1202,16 @@ app.post('/api/pine/scripts/:id/start', async (req, res) => {
   try {
     const doc = await PineScriptConfig.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Pine script not found' });
+    applyPineRuntimeOptions(doc, req.body || {});
+    await doc.save();
     const runner = await setActivePineScript(doc);
-    if (req.body?.capital || req.body?.risk) {
-      await runner.reset({ ...(req.body.capital && { capital: +req.body.capital }), ...(req.body.risk && { riskPerTradePct: +req.body.risk }) });
+    runner.executionEnabled = Boolean(doc.exchangeEnabled);
+    if (
+      req.body?.capital || req.body?.risk || req.body?.exchangeEnabled !== undefined ||
+      req.body?.lotSize !== undefined || req.body?.positionSizePct !== undefined || req.body?.minProfitBookingPct !== undefined ||
+      req.body?.profitRatioBooking !== undefined
+    ) {
+      await runner.reset(pineStrategyOptions(doc));
     }
     await startRunner(runner, { createNew: false });
     await emitPineState();
@@ -583,9 +1223,12 @@ app.post('/api/pine/scripts/:id/new', async (req, res) => {
   try {
     const doc = await PineScriptConfig.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Pine script not found' });
-    const runner = await setActivePineScript(doc);
     const { capital = 10000, risk = 2 } = req.body || {};
-    await runner.reset({ capital: +capital, riskPerTradePct: +risk });
+    applyPineRuntimeOptions(doc, { ...req.body, capital, risk });
+    await doc.save();
+    const runner = await setActivePineScript(doc);
+    runner.executionEnabled = Boolean(doc.exchangeEnabled);
+    await runner.reset(pineStrategyOptions(doc));
     await startRunner(runner, { createNew: true });
     await emitPineState();
     res.json({ ok: true, id: doc._id.toString(), runnerId: runner.id, sessionId: runner.sessionId });
@@ -627,9 +1270,11 @@ app.post('/api/pine/scripts/:id/reset', async (req, res) => {
   try {
     const doc = await PineScriptConfig.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Pine script not found' });
+    applyPineRuntimeOptions(doc, req.body || {});
+    await doc.save();
     const runner = ensurePineRunner(doc);
-    const { capital, risk } = req.body || {};
-    await runner.reset({ ...(capital && { capital: +capital }), ...(risk && { riskPerTradePct: +risk }) });
+    runner.executionEnabled = Boolean(doc.exchangeEnabled);
+    await runner.reset(pineStrategyOptions(doc));
     manager.maybeStopWs();
     await emitPineState();
     await manager.sendSessionsList(io);
@@ -687,7 +1332,19 @@ app.delete('/api/pine/scripts/:id', async (req, res) => {
 
 app.post('/api/pine/backtest', async (req, res) => {
   try {
-    const { scriptId, code, name = 'Backtest Pine', fromDate, toDate, capital = 10000, risk = 2 } = req.body || {};
+    const {
+      scriptId,
+      code,
+      name = 'Backtest Pine',
+      fromDate,
+      toDate,
+      capital = 10000,
+      risk = 2,
+      lotSize = 1,
+      positionSizePct = 0,
+      minProfitBookingPct = 0.5,
+      profitRatioBooking = 1.67,
+    } = req.body || {};
     let scriptCode = code;
     let scriptName = name;
     if (scriptId) {
@@ -710,7 +1367,16 @@ app.post('/api/pine/backtest', async (req, res) => {
     const candles = await fetchKlinesRange(warmupFrom, toMs);
     const warmupCandles = candles.filter(c => c.openTime < fromMs);
     const testCandles = candles.filter(c => c.openTime >= fromMs && c.openTime <= toMs);
-    const strategy = new PineScriptStrategy({ name: scriptName, code: scriptCode, capital: +capital, riskPerTradePct: +risk });
+    const strategy = new PineScriptStrategy({
+      name: scriptName,
+      code: scriptCode,
+      capital: +capital,
+      riskPerTradePct: +risk,
+      lotSize: +lotSize,
+      positionSizePct: +positionSizePct,
+      minProfitBookingPct: +minProfitBookingPct,
+      profitRatioBooking: +profitRatioBooking,
+    });
     if (warmupCandles.length >= strategy.minBars) strategy.restoreFromHistory(warmupCandles);
     const report = summarizeBacktest(strategy, testCandles, fromMs, toMs);
     report.warmupCandles = warmupCandles.length;
@@ -725,6 +1391,7 @@ app.get('/api/sessions', async (_req, res) => {
       id: s._id.toString(), shortId: s._id.toString().slice(-6).toUpperCase(),
       strategyType: s.strategyType || 'scalping', isRunning: s.isRunning,
       pineScriptId: s.pineScriptId?.toString?.() || s.pineScriptId || null,
+      executionMode: s.executionMode || 'paper',
       initialCapital: s.initialCapital, currentCapital: s.currentCapital,
       riskPerTradePct: s.riskPerTradePct, tradeCount: s.tradeCount, winCount: s.winCount,
       startedAt: s.startedAt, stoppedAt: s.stoppedAt,
@@ -756,8 +1423,17 @@ io.on('connection', async socket => {
 async function bootstrap () {
   try { await db.connect(); }
   catch (e) { console.error('[FATAL] MongoDB:', e.message); process.exit(1); }
+  await applySavedExchangeCredentials();
 
-  const activePineDocs = await PineScriptConfig.find({ isActive: true }).lean().catch(() => []);
+  const runningPineSessions = await Session.find({ strategyType: 'pine', isRunning: true, pineScriptId: { $ne: null } })
+    .select('pineScriptId')
+    .lean()
+    .catch(() => []);
+  const runningPineIds = [...new Set(runningPineSessions.map(s => idString(s.pineScriptId)).filter(Boolean))];
+  const pineBootQuery = runningPineIds.length
+    ? { $or: [{ isActive: true }, { _id: { $in: runningPineIds } }] }
+    : { isActive: true };
+  const activePineDocs = await PineScriptConfig.find(pineBootQuery).lean().catch(() => []);
   for (const doc of activePineDocs) {
     const runner = ensurePineRunner(doc);
     const saved = await runner.restoreFromDB();
@@ -776,12 +1452,16 @@ async function bootstrap () {
     }
   }
 
+  startBackendExchangeSync();
+  startStrategyWatchdog();
+
   server.listen(PORT, () => {
     console.log('\n' + '═'.repeat(62));
     console.log('  🚀  BTC Multi-Strategy Bot  |  Server-Side Persistent Engine');
     console.log(`  📡  http://localhost:${PORT}`);
     console.log(`  🔐  Auth: ${DASHBOARD_EMAIL}`);
     console.log(`  🗄️   MongoDB: ${process.env.MONGO_URI || 'mongodb://localhost:27017/btc_scalping_bot'}`);
+    console.log(`  🧾  Delta demo mirror: ${deltaClient.status().enabled ? 'ENABLED' : 'DISABLED'} (${deltaClient.status().productSymbol})`);
     console.log('  📝  Mode: PAPER TRADING  |  Strategies run 24/7 on server');
     console.log('═'.repeat(62) + '\n');
   });

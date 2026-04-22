@@ -27,6 +27,10 @@ class StrategyRunner {
     this.sessionStrategyType = opts.sessionStrategyType || id;
     this.pineScriptId        = opts.pineScriptId || null;
     this.displayName         = opts.displayName || id;
+    this.executionAdapter    = opts.executionAdapter || null;
+    this.executionEnabled    = Boolean(opts.executionEnabled);
+    this.onExchangeOrder     = typeof opts.onExchangeOrder === 'function' ? opts.onExchangeOrder : null;
+    this.lotSize             = opts.lotSize || null;
     this.sessionId        = null;
     this.running          = false;
     this.paused           = false;
@@ -62,6 +66,7 @@ class StrategyRunner {
           { upsert: true, new: true }
         ).catch(() => {});
       }
+      this.placeExchangeOrder('open', pos);
     });
 
     s.on('trade_closed', async trade => {
@@ -95,6 +100,8 @@ class StrategyRunner {
 
       await Position.deleteOne({ sessionId: this.sessionId }).catch(() => {});
 
+      this.placeExchangeOrder('close', trade);
+
       const sessInfo = await this.buildSessionInfo().catch(() => null);
       if (sessInfo) this.emit('session_info', sessInfo);
     });
@@ -120,6 +127,30 @@ class StrategyRunner {
     });
   }
 
+  placeExchangeOrder (action, payload) {
+    if (!this.executionEnabled || !this.executionAdapter?.enabled) return;
+    const fn = action === 'open'
+      ? this.executionAdapter.placeOpen.bind(this.executionAdapter)
+      : this.executionAdapter.placeClose.bind(this.executionAdapter);
+    const orderPayload = action === 'open'
+      ? { runner: this, position: payload }
+      : { runner: this, trade: payload };
+
+    fn(orderPayload)
+      .then(result => {
+        if (result?.skipped) return;
+        const side = result?.request?.side?.toUpperCase?.() || 'ORDER';
+        const size = result?.request?.size || '?';
+        this.log('info', `Delta demo ${action} ${side} order sent (${size} contracts)`);
+        if (this.onExchangeOrder) {
+          Promise.resolve(this.onExchangeOrder({ action, result, runner: this })).catch(() => {});
+        }
+      })
+      .catch(error => {
+        this.log('error', `Delta demo ${action} order failed: ${error.message}`);
+      });
+  }
+
   // ── Start / resume ─────────────────────────────────────────────────────────
   async start (opts = {}) {
     if (this.running) return;
@@ -133,6 +164,7 @@ class StrategyRunner {
         isRunning:         true,
         strategyType:      this.sessionStrategyType,
         ...(this.pineScriptId && { pineScriptId: this.pineScriptId }),
+        executionMode:     this.executionEnabled ? 'delta-demo' : 'paper',
         initialCapital:    s.initialCapital,
         currentCapital:    s.capital,
         riskPerTradePct:   s.riskPerTrade * 100,
@@ -143,6 +175,7 @@ class StrategyRunner {
       this.log('info', `📋 New session created: ${sess._id}`);
     } else {
       await Session.findByIdAndUpdate(this.sessionId, { isRunning: true, stoppedAt: null }).catch(() => {});
+      await Session.findByIdAndUpdate(this.sessionId, { executionMode: this.executionEnabled ? 'delta-demo' : 'paper' }).catch(() => {});
     }
 
     this.running = true;
@@ -277,6 +310,7 @@ class StrategyRunner {
       strategyType:   this.sessionStrategyType,
       runnerId:       this.id,
       pineScriptId:   this.pineScriptId,
+      executionMode:  sess.executionMode || (this.executionEnabled ? 'delta-demo' : 'paper'),
       isRunning:      sess.isRunning,
       paused:         this.paused,
       initialCapital: sess.initialCapital,
@@ -493,6 +527,7 @@ class BotManager {
       shortId:        s._id.toString().slice(-6).toUpperCase(),
       strategyType:   s.strategyType || 'scalping',
       pineScriptId:   s.pineScriptId?.toString?.() || s.pineScriptId || null,
+      executionMode:  s.executionMode || 'paper',
       isRunning:      s.isRunning,
       initialCapital: s.initialCapital,
       currentCapital: s.currentCapital,

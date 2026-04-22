@@ -15,6 +15,7 @@ const sessionSchema = new mongoose.Schema({
   isRunning:          { type: Boolean,  default: false   },
   strategyType:       { type: String,   default: 'scalping' },
   pineScriptId:       { type: mongoose.Schema.Types.ObjectId, ref: 'PineScriptConfig', index: true },
+  executionMode:      { type: String,   enum: ['paper', 'delta-demo'], default: 'paper', index: true },
   initialCapital:     { type: Number,   required: true   },
   currentCapital:     { type: Number,   required: true   },
   dailyStartCapital:  { type: Number                     },
@@ -98,7 +99,57 @@ const pineScriptSchema = new mongoose.Schema({
   name:     { type: String, default: 'Uploaded Pine' },
   code:     { type: String, default: '' },
   meta:     { type: Object, default: {} },
+  capital:  { type: Number, default: 10000 },
+  riskPerTradePct: { type: Number, default: 2 },
+  lotSize: { type: Number, default: 1 },
+  positionSizePct: { type: Number, default: 10 },
+  minProfitBookingPct: { type: Number, default: 0.5 },
+  profitRatioBooking: { type: Number, default: 1.67 },
+  exchangeEnabled: { type: Boolean, default: false },
+  exchangeProvider: { type: String, default: 'delta-demo' },
   isActive: { type: Boolean, default: false, index: true },
+}, { timestamps: true });
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ExchangeOrder — audit log for broker/demo exchange orders mirrored from bots
+// ─────────────────────────────────────────────────────────────────────────────
+const exchangeOrderSchema = new mongoose.Schema({
+  provider:       { type: String, default: 'delta-demo', index: true },
+  action:         { type: String, enum: ['open', 'close'], index: true },
+  status:         { type: String, enum: ['pending', 'sent', 'failed', 'skipped'], default: 'pending', index: true },
+  runnerId:       { type: String, index: true },
+  sessionId:      { type: mongoose.Schema.Types.ObjectId, ref: 'BotSession', index: true },
+  strategyType:   { type: String, index: true },
+  pineScriptId:   { type: mongoose.Schema.Types.ObjectId, ref: 'PineScriptConfig', index: true },
+  strategyName:   String,
+  tradeId:        Number,
+  positionType:   String,
+  side:           String,
+  productId:      Number,
+  productSymbol:  String,
+  requestedQty:   Number,
+  size:           Number,
+  reduceOnly:     Boolean,
+  clientOrderId:  String,
+  request:        Object,
+  response:       Object,
+  error:          String,
+}, { timestamps: true });
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ExchangeCredential — encrypted API credentials, one document per exchange
+// ─────────────────────────────────────────────────────────────────────────────
+const exchangeCredentialSchema = new mongoose.Schema({
+  provider:          { type: String, required: true, unique: true, index: true },
+  name:              { type: String, required: true },
+  enabled:           { type: Boolean, default: false, index: true },
+  apiKeyEncrypted:   String,
+  apiSecretEncrypted:String,
+  baseUrl:           String,
+  productSymbol:     String,
+  productId:         Number,
+  credentialSource:  { type: String, enum: ['database', 'env'], default: 'database' },
+  configuredAt:      Date,
 }, { timestamps: true });
 
 module.exports = {
@@ -109,4 +160,6 @@ module.exports = {
   Equity:    mongoose.model('BotEquity',    equitySchema),
   Position:  mongoose.model('BotPosition',  positionSchema),
   PineScriptConfig: mongoose.model('PineScriptConfig', pineScriptSchema),
+  ExchangeOrder: mongoose.model('ExchangeOrder', exchangeOrderSchema),
+  ExchangeCredential: mongoose.model('ExchangeCredential', exchangeCredentialSchema),
 };

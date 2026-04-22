@@ -48,6 +48,8 @@ button:disabled{opacity:.35;cursor:not-allowed}
 .label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:.04em;text-transform:uppercase}
 .inp,.code{width:100%;background:#0d101a;border:1px solid var(--line);border-radius:4px;color:var(--text);font:inherit;padding:8px;outline:none}
 .inp:focus,.code:focus{border-color:var(--pink)}
+.check-row{display:flex;align-items:center;gap:8px;background:#0d101a;border:1px solid var(--line);border-radius:4px;padding:8px;color:var(--text);font-weight:800}
+.check-row input{width:16px;height:16px;accent-color:var(--green)}
 .code{height:330px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.45}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .script-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--panel2);max-height:300px;overflow-y:auto}
@@ -59,6 +61,8 @@ button:disabled{opacity:.35;cursor:not-allowed}
 .badge{display:inline-flex;align-items:center;border-radius:3px;padding:2px 6px;font-size:10px;font-weight:900}
 .badge.active{background:#00e67618;color:var(--green)}
 .badge.saved{background:#5a608018;color:var(--muted)}
+.badge.open{background:#2979ff18;color:var(--blue)}
+.badge.closed{background:#5a608018;color:var(--muted)}
 .badge.long{background:#00e67618;color:var(--green)}
 .badge.short{background:#ff3d5718;color:var(--red)}
 .badge.tp{background:#2979ff18;color:var(--blue)}
@@ -77,6 +81,9 @@ button:disabled{opacity:.35;cursor:not-allowed}
 .chart-state-main{font-size:13px;font-weight:900;margin-top:3px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chart-state-sub{display:flex;gap:8px;flex-wrap:wrap;margin-top:5px;font-size:11px;color:var(--muted)}
 .table-wrap{overflow:auto;max-height:285px;border:1px solid var(--line);border-radius:4px;background:var(--panel2)}
+.wide-table{min-width:920px}
+.positions-metrics{display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:8px;margin-bottom:10px}
+.sync-strip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 table{width:100%;border-collapse:collapse;font-size:11px}
 th{position:sticky;top:0;background:#151827;color:var(--muted);font-size:10px;text-align:left;padding:7px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:7px;border-bottom:1px solid #1d2032;white-space:nowrap}
@@ -117,7 +124,6 @@ tr:last-child td{border-bottom:0}
       <span class="pill"><span class="dot" id="pine-dot"></span><span id="pine-label">STOPPED</span></span>
       <span class="pill">K <span id="ws-kline" class="neg">OFF</span></span>
       <span class="pill">T <span id="ws-ticker" class="neg">OFF</span></span>
-      <a class="link-btn" href="/">Dashboard</a>
       <form method="POST" action="/logout" style="margin:0">
         <button class="ghost-btn" type="submit">Logout</button>
       </form>
@@ -143,34 +149,43 @@ tr:last-child td{border-bottom:0}
               <input class="inp" id="risk" type="number" value="2" min="0.1" max="20" step="0.1">
             </div>
           </div>
+          <div class="grid3" style="margin-top:8px">
+            <div class="field">
+              <label class="label" for="lot-size">Lot size</label>
+              <input class="inp" id="lot-size" type="number" value="1" min="1" step="1">
+            </div>
+            <div class="field">
+              <label class="label" for="min-profit-booking">Min profit booking %</label>
+              <input class="inp" id="min-profit-booking" type="number" value="0.5" min="0" step="0.1">
+            </div>
+            <div class="field">
+              <label class="label" for="profit-ratio-booking">Profit ratio booking</label>
+              <input class="inp" id="profit-ratio-booking" type="number" value="1.67" min="0.1" step="0.1">
+            </div>
+          </div>
+          <label class="check-row" style="margin-top:8px">
+            <input id="exchange-enabled" type="checkbox">
+            <span>Connect selected exchange and execute selected Pine trades</span>
+          </label>
+          <div class="grid2" style="margin-top:8px">
+            <div class="field">
+              <label class="label" for="exchange-provider">Exchange name</label>
+              <select class="inp" id="exchange-provider">
+                <option value="delta-demo">Delta Exchange Demo</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="label">API keys</label>
+              <button class="link-btn" type="button" onclick="openExchangeSettings()">Set Exchange Keys</button>
+            </div>
+          </div>
+          <div class="muted" id="exchange-key-state" style="margin-top:6px">Exchange keys loading...</div>
           <div class="btn-row">
             <button class="solid-btn" type="button" onclick="activateSelected()">Activate Selected</button>
             <button class="link-btn" type="button" onclick="newBot()">Run Selected</button>
             <button class="ghost-btn" type="button" onclick="editSelected()">Edit</button>
             <button class="danger-btn" type="button" onclick="deleteSelected()">Delete Selected</button>
           </div>
-        </div>
-      </section>
-
-    </div>
-
-    <div class="stack">
-      <section class="panel">
-        <div class="panel-head">
-          <div class="panel-title">BTC Candles / Selected Pine State</div>
-          <div class="muted" id="chart-last">Waiting for candles</div>
-        </div>
-        <div class="chart-wrap">
-          <div id="chart-state" class="chart-state">
-            <div class="chart-state-title">Selected Pine</div>
-            <div class="chart-state-main" id="chart-script">No script selected</div>
-            <div class="chart-state-sub">
-              <span id="chart-run-state">Stopped</span>
-              <span id="chart-pos-state">Flat</span>
-              <span id="chart-pnl-state">P&L --</span>
-            </div>
-          </div>
-          <div id="price-chart"></div>
         </div>
       </section>
 
@@ -192,65 +207,83 @@ tr:last-child td{border-bottom:0}
         </div>
       </section>
 
+    </div>
+
+    <div class="stack">
       <section class="panel">
-        <div class="panel-head">
-          <div class="panel-title">Date Range Backtest</div>
-          <button class="solid-btn" type="button" onclick="runBacktest()">Run Backtest</button>
+      <div class="panel-head">
+          <div class="panel-title">BTC Candles / Selected Pine State</div>
+          <div class="muted" id="chart-last">Waiting for candles</div>
         </div>
-        <div class="panel-body">
-          <div class="grid2">
-            <div class="field">
-              <label class="label" for="backtest-from">From</label>
-              <input class="inp" id="backtest-from" type="date">
-            </div>
-            <div class="field">
-              <label class="label" for="backtest-to">To</label>
-              <input class="inp" id="backtest-to" type="date">
+        <div class="chart-wrap">
+          <div id="chart-state" class="chart-state">
+            <div class="chart-state-title">Selected Pine</div>
+            <div class="chart-state-main" id="chart-script">No script selected</div>
+            <div class="chart-state-sub">
+              <span id="chart-run-state">Stopped</span>
+              <span id="chart-pos-state">Flat</span>
+              <span id="chart-pnl-state">P&L --</span>
+              <span id="chart-delta-state"></span>
+              <span id="chart-style-state"></span>
             </div>
           </div>
-          <div id="backtest-report" class="report muted">Select a saved script, or add Pine code from the popup, then choose dates and run a backtest.</div>
+          <div id="price-chart"></div>
         </div>
       </section>
 
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">Performance</div>
-          <div class="muted" id="session-info">--</div>
+          <div class="panel-title">Exchange Positions / PNL</div>
+          <div class="muted" id="positions-updated-at">Waiting for exchange sync</div>
         </div>
         <div class="panel-body">
-          <div class="grid3">
-            <div class="metric"><div class="metric-label">Net P&L</div><div class="metric-value" id="m-pnl">--</div></div>
-            <div class="metric"><div class="metric-label">Return</div><div class="metric-value" id="m-ret">--</div></div>
-            <div class="metric"><div class="metric-label">Day P&L</div><div class="metric-value" id="m-day">--</div></div>
-            <div class="metric"><div class="metric-label">Trades</div><div class="metric-value" id="m-trades">0</div></div>
-            <div class="metric"><div class="metric-label">Win Rate</div><div class="metric-value" id="m-wr">--</div></div>
-            <div class="metric"><div class="metric-label">Profit Factor</div><div class="metric-value" id="m-pf">--</div></div>
+          <div class="sync-strip">
+            <span class="pill" id="positions-delta-pill">DELTA --</span>
+            <span class="pill" id="positions-bot-pill">BOTS --</span>
+            <span class="pill" id="positions-countdown-pill">NEXT SYNC --</span>
+            <button class="link-btn" id="force-sync-btn" type="button" onclick="forceExchangeSync()">Force Sync</button>
+          </div>
+          <div class="positions-metrics">
+            <div class="metric"><div class="metric-label">Open</div><div class="metric-value" id="pos-open-count">0</div></div>
+            <div class="metric"><div class="metric-label">Closed</div><div class="metric-value" id="pos-closed-count">0</div></div>
+            <div class="metric"><div class="metric-label">Open PNL</div><div class="metric-value" id="pos-open-pnl">$0.00</div></div>
+            <div class="metric"><div class="metric-label">Closed PNL</div><div class="metric-value" id="pos-closed-pnl">$0.00</div></div>
+            <div class="metric"><div class="metric-label">Net PNL</div><div class="metric-value" id="pos-net-pnl">$0.00</div></div>
+          </div>
+          <div class="table-wrap">
+            <table class="wide-table">
+              <thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Time</th><th>Session</th></tr></thead>
+              <tbody id="positions-open-body"><tr><td colspan="10" class="muted">No open positions.</td></tr></tbody>
+            </table>
           </div>
         </div>
       </section>
 
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">Open Position</div>
-          <div class="muted" id="position-state">Flat</div>
-        </div>
-        <div class="panel-body">
-          <div id="position-box" class="position-box muted">No active position.</div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <div class="panel-title">Closed Trades</div>
-          <div class="muted" id="trade-count">0 trades</div>
+          <div class="panel-title">Closed Exchange Positions</div>
+          <div class="muted" id="positions-closed-sub">Realized PNL</div>
         </div>
         <div class="panel-body">
           <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th>ID</th><th>Side</th><th>Entry</th><th>Exit</th><th>P&L</th><th>%</th><th>Reason</th><th>Time</th></tr>
-              </thead>
-              <tbody id="trade-body"><tr><td colspan="8" class="muted">No closed trades.</td></tr></tbody>
+            <table class="wide-table">
+              <thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Reason</th><th>Exit Time</th><th>Session</th></tr></thead>
+              <tbody id="positions-closed-body"><tr><td colspan="11" class="muted">No closed positions.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Delta Demo Orders</div>
+          <div class="muted">Last 100 mirrored orders</div>
+        </div>
+        <div class="panel-body">
+          <div class="table-wrap">
+            <table class="wide-table">
+              <thead><tr><th>Status</th><th>Action</th><th>Strategy</th><th>Side</th><th>Product</th><th>Size</th><th>Bot Lots</th><th>Error</th><th>Time</th></tr></thead>
+              <tbody id="positions-orders-body"><tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -282,6 +315,40 @@ tr:last-child td{border-bottom:0}
         <label class="label" for="script-name">Script name</label>
         <input class="inp" id="script-name" value="Uploaded Pine Strategy">
       </div>
+      <div class="grid2" style="margin-top:8px">
+        <div class="field">
+          <label class="label" for="editor-capital">Capital</label>
+          <input class="inp" id="editor-capital" type="number" value="10000" min="100" step="100">
+        </div>
+        <div class="field">
+          <label class="label" for="editor-risk">Risk per trade %</label>
+          <input class="inp" id="editor-risk" type="number" value="2" min="0.1" max="20" step="0.1">
+        </div>
+      </div>
+      <div class="grid3" style="margin-top:8px">
+        <div class="field">
+          <label class="label" for="editor-lot-size">Lot size</label>
+          <input class="inp" id="editor-lot-size" type="number" value="1" min="1" step="1">
+        </div>
+        <div class="field">
+          <label class="label" for="editor-min-profit-booking">Min profit booking %</label>
+          <input class="inp" id="editor-min-profit-booking" type="number" value="0.5" min="0" step="0.1">
+        </div>
+        <div class="field">
+          <label class="label" for="editor-profit-ratio-booking">Profit ratio booking</label>
+          <input class="inp" id="editor-profit-ratio-booking" type="number" value="1.67" min="0.1" step="0.1">
+        </div>
+      </div>
+      <label class="check-row" style="margin-top:8px">
+        <input id="editor-exchange-enabled" type="checkbox">
+        <span>Connect selected exchange and execute trades for this Pine bot</span>
+      </label>
+      <div class="field" style="margin-top:8px">
+        <label class="label" for="editor-exchange-provider">Exchange name</label>
+        <select class="inp" id="editor-exchange-provider">
+          <option value="delta-demo">Delta Exchange Demo</option>
+        </select>
+      </div>
       <div class="field" style="margin-top:8px">
         <label class="label" for="pine-file">Upload .pine or .txt</label>
         <input class="inp" id="pine-file" type="file" accept=".pine,.txt,.pinescript,text/plain">
@@ -302,16 +369,77 @@ tr:last-child td{border-bottom:0}
   </div>
 </div>
 
+<div class="modal-backdrop" id="exchange-settings-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="exchange-settings-title">
+    <div class="modal-head">
+      <div class="modal-title" id="exchange-settings-title">Exchange API Keys</div>
+      <div class="spacer"></div>
+      <div class="muted" id="exchange-settings-mode">Delta Exchange Demo</div>
+      <button class="ghost-btn" type="button" onclick="closeExchangeSettings()">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="label" for="exchange-settings-provider">Exchange name</label>
+        <select class="inp" id="exchange-settings-provider">
+          <option value="delta-demo">Delta Exchange Demo</option>
+        </select>
+      </div>
+      <label class="check-row" style="margin-top:8px">
+        <input id="exchange-settings-enabled" type="checkbox">
+        <span>Enable this exchange for bot execution and position sync</span>
+      </label>
+      <div class="grid2" style="margin-top:8px">
+        <div class="field">
+          <label class="label" for="exchange-api-key">API key</label>
+          <input class="inp" id="exchange-api-key" type="password" autocomplete="off" placeholder="Leave blank to keep saved key">
+        </div>
+        <div class="field">
+          <label class="label" for="exchange-api-secret">API secret</label>
+          <input class="inp" id="exchange-api-secret" type="password" autocomplete="off" placeholder="Leave blank to keep saved secret">
+        </div>
+      </div>
+      <div class="grid3" style="margin-top:8px">
+        <div class="field">
+          <label class="label" for="exchange-base-url">Base URL</label>
+          <input class="inp" id="exchange-base-url" value="https://cdn-ind.testnet.deltaex.org">
+        </div>
+        <div class="field">
+          <label class="label" for="exchange-product-symbol">Product symbol</label>
+          <input class="inp" id="exchange-product-symbol" value="BTCUSD">
+        </div>
+        <div class="field">
+          <label class="label" for="exchange-product-id">Product ID</label>
+          <input class="inp" id="exchange-product-id" type="number" min="1" step="1" placeholder="Auto">
+        </div>
+      </div>
+      <div class="status-card muted" id="exchange-settings-status" style="margin-top:10px">Saved keys are masked and never shown again.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost-btn" type="button" onclick="closeExchangeSettings()">Cancel</button>
+      <button class="solid-btn" type="button" onclick="saveExchangeSettings()">Save Exchange Keys</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const socket = io();
 let selectedPineScriptId = null;
 let pineScripts = [];
+let exchanges = [];
+let activeExchangeStatus = null;
 let aggregateState = { running:false, paused:false, warmedUp:false, runningCount:0 };
 let runningState = { running:false, paused:false, warmedUp:false };
 let currentPrice = null;
 let rawCandles = [];
 let latestStats = {};
+let selectedExchangeState = null;
+let selectedPineCode = '';
+let selectedChartMeta = {};
+let exchangeSyncInFlight = false;
+let nextExchangeSyncAt = 0;
+let lastBackendExchangeSync = null;
+const EXCHANGE_SYNC_INTERVAL_MS = 30000;
 let priceChart = null;
 let candleSeries = null;
 let emaFastSeries = null;
@@ -341,6 +469,40 @@ async function api (path, opts = {}) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
+function getRuntimeOptions (prefix = '') {
+  const capEl = $(prefix ? `${prefix}-capital` : 'capital');
+  const riskEl = $(prefix ? `${prefix}-risk` : 'risk');
+  const sizeEl = $(prefix ? `${prefix}-lot-size` : 'lot-size');
+  const minProfitEl = $(prefix ? `${prefix}-min-profit-booking` : 'min-profit-booking');
+  const ratioEl = $(prefix ? `${prefix}-profit-ratio-booking` : 'profit-ratio-booking');
+  const exchangeEl = $(prefix ? `${prefix}-exchange-enabled` : 'exchange-enabled');
+  const providerEl = $(prefix ? `${prefix}-exchange-provider` : 'exchange-provider');
+  return {
+    capital: Number(capEl?.value) || 10000,
+    risk: Number(riskEl?.value) || 2,
+    lotSize: Math.max(1, Math.round(Number(sizeEl?.value) || 1)),
+    minProfitBookingPct: Number(minProfitEl?.value) || 0,
+    profitRatioBooking: Number(ratioEl?.value) || 1.67,
+    exchangeEnabled: Boolean(exchangeEl?.checked),
+    exchangeProvider: providerEl?.value || 'delta-demo',
+  };
+}
+function setRuntimeOptions (opts = {}, prefix = '') {
+  const capEl = $(prefix ? `${prefix}-capital` : 'capital');
+  const riskEl = $(prefix ? `${prefix}-risk` : 'risk');
+  const sizeEl = $(prefix ? `${prefix}-lot-size` : 'lot-size');
+  const minProfitEl = $(prefix ? `${prefix}-min-profit-booking` : 'min-profit-booking');
+  const ratioEl = $(prefix ? `${prefix}-profit-ratio-booking` : 'profit-ratio-booking');
+  const exchangeEl = $(prefix ? `${prefix}-exchange-enabled` : 'exchange-enabled');
+  const providerEl = $(prefix ? `${prefix}-exchange-provider` : 'exchange-provider');
+  if (capEl) capEl.value = opts.capital || 10000;
+  if (riskEl) riskEl.value = opts.riskPerTradePct || opts.risk || 2;
+  if (sizeEl) sizeEl.value = opts.lotSize ?? 1;
+  if (minProfitEl) minProfitEl.value = opts.minProfitBookingPct ?? 0.5;
+  if (ratioEl) ratioEl.value = opts.profitRatioBooking ?? 1.67;
+  if (exchangeEl) exchangeEl.checked = Boolean(opts.exchangeEnabled);
+  if (providerEl) providerEl.value = opts.exchangeProvider || 'delta-demo';
+}
 function addLog (level, msg) {
   const row = document.createElement('div');
   row.className = 'log-line';
@@ -359,6 +521,23 @@ function selectedScript () {
 function selectedScriptIsLive () {
   const script = selectedScript();
   return Boolean(script?.status?.running || script?.isActive);
+}
+function exchangeNameFor (provider = 'delta-demo') {
+  return exchanges.find(e => e.provider === provider)?.name || (provider === 'delta-demo' ? 'Delta Exchange Demo' : provider);
+}
+function updateExchangeKeyState () {
+  const el = $('exchange-key-state');
+  if (!el) return;
+  const status = activeExchangeStatus;
+  if (!status) {
+    el.textContent = 'Exchange keys loading...';
+    el.className = 'muted';
+    return;
+  }
+  const configured = status.configured ? `key ${status.maskedApiKey || 'saved'}` : 'no key saved';
+  const enabled = status.enabled ? 'enabled' : 'disabled';
+  el.textContent = `${status.name || exchangeNameFor(status.provider)} ${enabled} / ${configured} / ${status.productSymbol || 'BTCUSD'}`;
+  el.className = status.enabled && status.configured && !status.lastError ? 'pos' : (status.lastError ? 'neg' : 'muted');
 }
 
 const LC_THEME = {
@@ -411,6 +590,72 @@ function computeVWAP (candles) {
   });
 }
 
+function selectedIndicatorText () {
+  const script = selectedScript();
+  const meta = script?.meta || selectedChartMeta || latestStats.scriptMeta || {};
+  return [
+    script?.name,
+    selectedPineCode,
+    meta.name,
+    meta.longCondition,
+    meta.shortCondition,
+    Array.isArray(meta.variables) ? meta.variables.join(' ') : '',
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function useHeikinAshiCandles () {
+  return /\bheikin|\bheiken|\bha(open|high|low|close|candle|trend)?\b/.test(selectedIndicatorText());
+}
+
+function toHeikinAshi (candles) {
+  let prevOpen = null;
+  let prevClose = null;
+  return candles.map(c => {
+    const haClose = (c.open + c.high + c.low + c.close) / 4;
+    const haOpen = prevOpen == null ? (c.open + c.close) / 2 : (prevOpen + prevClose) / 2;
+    const haHigh = Math.max(c.high, haOpen, haClose);
+    const haLow = Math.min(c.low, haOpen, haClose);
+    prevOpen = haOpen;
+    prevClose = haClose;
+    return { ...c, open:haOpen, high:haHigh, low:haLow, close:haClose };
+  });
+}
+
+function pineSignalByTime () {
+  const map = new Map();
+  for (const snap of latestStats.indicatorSnaps || []) {
+    if (snap?.time) map.set(Math.floor(snap.time / 1000), snap);
+  }
+  return map;
+}
+
+function styledCandleData (candles) {
+  const ha = useHeikinAshiCandles();
+  const styled = ha ? toHeikinAshi(candles) : candles;
+  const signals = pineSignalByTime();
+  return styled.map((c, i) => {
+    const time = candleTime(candles[i]);
+    const data = { time, open:c.open, high:c.high, low:c.low, close:c.close };
+    const snap = selectedScriptIsLive() ? signals.get(time) : null;
+    if (snap?.longSignal) {
+      return { ...data, color:'#00e676', borderColor:'#00e676', wickColor:'#9cffc7' };
+    }
+    if (snap?.shortSignal) {
+      return { ...data, color:'#ff3d57', borderColor:'#ff3d57', wickColor:'#ff9aaa' };
+    }
+    if (ha) {
+      const up = c.close >= c.open;
+      return {
+        ...data,
+        color: up ? '#16c784' : '#ea3943',
+        borderColor: up ? '#16c784' : '#ea3943',
+        wickColor: up ? '#8ee6b7' : '#f19aa0',
+      };
+    }
+    return data;
+  });
+}
+
 function candleTime (c) {
   return Math.floor(c.openTime / 1000);
 }
@@ -421,13 +666,13 @@ function renderCandles (candles = []) {
   const ema8 = computeEMA(closes, 8);
   const ema21 = computeEMA(closes, 21);
   const vwap = computeVWAP(rawCandles);
-  candleSeries.setData(rawCandles.map(c => ({ time:candleTime(c), open:c.open, high:c.high, low:c.low, close:c.close })));
+  candleSeries.setData(styledCandleData(rawCandles));
   emaFastSeries.setData(rawCandles.map((c, i) => ema8[i] != null ? { time:candleTime(c), value:ema8[i] } : null).filter(Boolean));
   emaSlowSeries.setData(rawCandles.map((c, i) => ema21[i] != null ? { time:candleTime(c), value:ema21[i] } : null).filter(Boolean));
   vwapSeries.setData(rawCandles.map((c, i) => vwap[i] != null ? { time:candleTime(c), value:vwap[i] } : null).filter(Boolean));
   $('chart-last').textContent = fmtDT(rawCandles[rawCandles.length - 1].openTime);
   redrawChartMarkers();
-  renderChartPosition(latestStats.position);
+  updateChartState();
   priceChart.timeScale().scrollToRealTime();
 }
 
@@ -448,9 +693,13 @@ function clearPositionLines () {
 function renderChartPosition (pos) {
   clearPositionLines();
   if (!candleSeries || !pos || !selectedScriptIsLive()) return;
-  positionLines.entry = candleSeries.createPriceLine({ price:pos.entry, color:'#f48fb1', lineWidth:1, lineStyle:0, title:'PINE ENTRY' });
-  positionLines.sl = candleSeries.createPriceLine({ price:pos.trailSl || pos.sl, color:'#ff3d57', lineWidth:1, lineStyle:2, title:'PINE SL' });
-  positionLines.tp = candleSeries.createPriceLine({ price:pos.tp, color:'#00e676', lineWidth:1, lineStyle:2, title:'PINE TP' });
+  if (Number.isFinite(Number(pos.entry))) {
+    positionLines.entry = candleSeries.createPriceLine({ price:Number(pos.entry), color:'#f48fb1', lineWidth:1, lineStyle:0, title:pos.source === 'delta' ? 'DELTA ENTRY' : 'PINE ENTRY' });
+  }
+  const sl = Number(pos.trailSl || pos.sl);
+  const tp = Number(pos.tp);
+  if (Number.isFinite(sl)) positionLines.sl = candleSeries.createPriceLine({ price:sl, color:'#ff3d57', lineWidth:1, lineStyle:2, title:'PINE SL' });
+  if (Number.isFinite(tp)) positionLines.tp = candleSeries.createPriceLine({ price:tp, color:'#00e676', lineWidth:1, lineStyle:2, title:'PINE TP' });
 }
 
 function setTradeMarkers (trades = []) {
@@ -508,10 +757,31 @@ function updateChartState () {
     : runningState.running ? (runningState.paused ? 'Paused' : (runningState.warmedUp ? 'Live' : 'Warming'))
       : script.isActive ? 'Active / stopped' : 'Saved';
   $('chart-run-state').textContent = run;
-  const pos = selectedScriptIsLive() ? latestStats.position : null;
-  $('chart-pos-state').innerHTML = pos ? `<span class="${pos.type === 'long' ? 'pos' : 'neg'}">${pos.type.toUpperCase()}</span> @ ${fmtUSD(pos.entry)}` : 'Flat';
-  const pnl = selectedScriptIsLive() ? Number(latestStats.totalPnl || 0) : 0;
-  $('chart-pnl-state').innerHTML = `P&L <span class="${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</span>`;
+  const useExchange = Boolean(script?.exchangeEnabled && selectedExchangeState);
+  const pos = selectedScriptIsLive()
+    ? (useExchange ? selectedExchangeState.position : latestStats.position)
+    : null;
+  let liveOpenPnl = null;
+  if (pos && Number.isFinite(Number(currentPrice || pos.markPrice)) && Number.isFinite(Number(pos.entry))) {
+    const mark = Number(currentPrice || pos.markPrice);
+    const qty = Number(pos.qty || pos.size || 0);
+    liveOpenPnl = pos.type === 'short' ? (Number(pos.entry) - mark) * qty : (mark - Number(pos.entry)) * qty;
+  }
+  const markLabel = pos ? (useExchange ? pos.markPrice : currentPrice) : null;
+  $('chart-pos-state').innerHTML = pos
+    ? `<span class="${pos.type === 'long' ? 'pos' : 'neg'}">${pos.type.toUpperCase()}</span> @ ${fmtUSD(pos.entry)}${Number.isFinite(Number(markLabel)) ? ` / Mark ${fmtUSD(markLabel)}` : ''}`
+    : 'Flat';
+  const pnl = selectedScriptIsLive()
+    ? Number(useExchange
+      ? selectedExchangeState.closedPnl + (Number.isFinite(liveOpenPnl) ? liveOpenPnl : selectedExchangeState.openPnl)
+      : latestStats.totalPnl || 0)
+    : 0;
+  const src = useExchange ? 'Delta P&L' : 'P&L';
+  $('chart-pnl-state').innerHTML = `${src} <span class="${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</span>`;
+  $('chart-delta-state').textContent = script?.exchangeEnabled ? (useExchange ? 'Synced' : 'Waiting Delta sync') : '';
+  $('chart-style-state').textContent = useHeikinAshiCandles()
+    ? 'HA candles'
+    : ((latestStats.indicatorSnaps || []).length ? 'Pine signal candles' : '');
   renderChartPosition(pos);
 }
 
@@ -543,18 +813,51 @@ function updateStatus (status = {}) {
   updateChartState();
 }
 
-function updatePineConfig ({ id, name, code, meta } = {}) {
+function updatePineConfig ({
+  id,
+  name,
+  code,
+  meta,
+  capital,
+  riskPerTradePct,
+  risk,
+  lotSize,
+  minProfitBookingPct,
+  profitRatioBooking,
+  exchangeEnabled,
+  exchangeProvider,
+} = {}) {
   if (id !== undefined) selectedPineScriptId = id;
   if (name !== undefined) $('script-name').value = name;
-  if (code !== undefined) $('pine-code').value = code;
+  if (code !== undefined) {
+    $('pine-code').value = code;
+    selectedPineCode = code || '';
+  }
+  if (meta !== undefined) selectedChartMeta = meta || {};
+  if (
+    capital !== undefined || riskPerTradePct !== undefined || risk !== undefined ||
+    lotSize !== undefined || minProfitBookingPct !== undefined ||
+    profitRatioBooking !== undefined || exchangeEnabled !== undefined || exchangeProvider !== undefined
+  ) {
+    setRuntimeOptions({ capital, riskPerTradePct, risk, lotSize, minProfitBookingPct, profitRatioBooking, exchangeEnabled, exchangeProvider });
+  }
+  const selected = selectedScript();
+  if (selected) setRuntimeOptions(selected);
   const scriptName = name || meta?.name || 'Uploaded Pine';
   const hasScript = Boolean(meta?.hasScript || code);
   const warnings = meta?.warnings?.length ? `<div class="neg">${esc(meta.warnings.join(' '))}</div>` : '';
   const longCond = meta?.longCondition ? `<div>Long: <b>${esc(meta.longCondition)}</b></div>` : '';
   const shortCond = meta?.shortCondition ? `<div>Short: <b>${esc(meta.shortCondition)}</b></div>` : '';
+  const provider = selected?.exchangeProvider || exchangeProvider || 'delta-demo';
+  const exchangeLabel = exchangeNameFor(provider);
+  const keyReady = !selected?.exchangeEnabled || (activeExchangeStatus?.provider === provider && activeExchangeStatus?.enabled && activeExchangeStatus?.configured);
+  const exchangeLine = selected?.exchangeEnabled
+    ? `<div class="${keyReady ? 'pos' : 'warn'}">Execution: <b>${esc(exchangeLabel)}</b>${keyReady ? '' : ' / API keys not enabled'}</div>`
+    : '<div class="muted">Execution: Paper only</div>';
   $('script-status').innerHTML = hasScript
-    ? `<div>Loaded: <b>${esc(scriptName)}</b></div>${longCond}${shortCond}${warnings}`
+    ? `<div>Loaded: <b>${esc(scriptName)}</b></div>${longCond}${shortCond}${exchangeLine}${warnings}`
     : 'No Pine script loaded.';
+  if (rawCandles.length) renderCandles(rawCandles);
   updateChartState();
 }
 
@@ -569,10 +872,15 @@ function renderScripts (scripts = pineScripts) {
       const bits = [
         s.meta?.longCondition ? 'Long' : null,
         s.meta?.shortCondition ? 'Short' : null,
+        s.exchangeEnabled ? exchangeNameFor(s.exchangeProvider || 'delta-demo') : 'Paper',
+        s.capital ? `Cap ${fmtUSD(s.capital)}` : null,
+        s.lotSize !== undefined ? `Lot ${Number(s.lotSize).toFixed(0)}` : null,
+        s.minProfitBookingPct !== undefined ? `Min ${Number(s.minProfitBookingPct).toFixed(2)}%` : null,
+        s.profitRatioBooking !== undefined ? `RR ${Number(s.profitRatioBooking).toFixed(2)}` : null,
         s.updatedAt ? fmtDT(s.updatedAt) : null,
       ].filter(Boolean).join(' / ');
       const activeRunning = s.status?.running;
-      const badgeText = activeRunning ? (s.status?.paused ? 'PAUSED' : 'RUNNING') : (s.isActive ? 'ACTIVE' : 'SAVED');
+      const badgeText = activeRunning ? (s.status?.paused ? 'PAUSED' : 'RUNNING') : (s.exchangeEnabled ? 'EXCHANGE' : (s.isActive ? 'ACTIVE' : 'SAVED'));
       const badgeClass = activeRunning || s.isActive ? 'active' : 'saved';
       return `<div class="script-row ${s.id === selectedPineScriptId ? 'active' : ''}" onclick="selectScript('${esc(s.id)}')">
         <div>
@@ -584,6 +892,7 @@ function renderScripts (scripts = pineScripts) {
     }).join('')
     : '<div class="empty">No saved Pine scripts yet.</div>';
   const selected = selectedScript();
+  if (selected) setRuntimeOptions(selected);
   updateStatus(selected?.status || { running:false, paused:false, warmedUp:false });
   if (selected?.stats) applyStats(selected.stats, false);
   else applyStats({ totalPnl:0, totalReturn:0, dayPnl:0, totalTrades:0, position:null, recentTrades:[] }, false);
@@ -592,6 +901,7 @@ function renderScripts (scripts = pineScripts) {
 }
 function selectScript (id) {
   selectedPineScriptId = id;
+  selectedExchangeState = null;
   renderScripts();
   if (!selectedScriptIsLive()) {
     setTradeMarkers([]);
@@ -601,9 +911,67 @@ function selectScript (id) {
     renderChartPosition(latestStats.position);
   }
   loadSelectedRuntime();
+  loadExchangePositions();
 }
 async function loadScripts () {
   renderScripts(await api('/api/pine/runners'));
+}
+async function loadExchanges () {
+  const data = await api('/api/exchanges');
+  exchanges = data.exchanges || [];
+  activeExchangeStatus = exchanges.find(e => e.provider === 'delta-demo') || null;
+  updateExchangeKeyState();
+  return exchanges;
+}
+async function openExchangeSettings () {
+  try {
+    if (!exchanges.length) await loadExchanges();
+  } catch (err) {
+    addLog('error', `Exchange settings load failed: ${err.message}`);
+  }
+  const provider = $('exchange-provider')?.value || activeExchangeStatus?.provider || 'delta-demo';
+  const status = exchanges.find(e => e.provider === provider) || activeExchangeStatus || {};
+  $('exchange-settings-provider').value = provider;
+  $('exchange-settings-enabled').checked = Boolean(status.enabled);
+  $('exchange-api-key').value = '';
+  $('exchange-api-secret').value = '';
+  $('exchange-base-url').value = status.baseUrl || 'https://cdn-ind.testnet.deltaex.org';
+  $('exchange-product-symbol').value = status.productSymbol || 'BTCUSD';
+  $('exchange-product-id').value = status.productId || '';
+  $('exchange-settings-mode').textContent = status.name || exchangeNameFor(provider);
+  $('exchange-settings-status').innerHTML = status.configured
+    ? `Saved key: <b>${esc(status.maskedApiKey || 'configured')}</b> / Source: ${esc(status.credentialSource || 'database')}`
+    : 'No saved API key for this exchange.';
+  $('exchange-settings-modal').classList.add('open');
+}
+function closeExchangeSettings () {
+  $('exchange-settings-modal').classList.remove('open');
+}
+async function saveExchangeSettings () {
+  const provider = $('exchange-settings-provider').value || 'delta-demo';
+  try {
+    const payload = {
+      enabled: $('exchange-settings-enabled').checked,
+      apiKey: $('exchange-api-key').value.trim(),
+      apiSecret: $('exchange-api-secret').value.trim(),
+      baseUrl: $('exchange-base-url').value.trim(),
+      productSymbol: $('exchange-product-symbol').value.trim(),
+      productId: $('exchange-product-id').value.trim(),
+    };
+    const data = await api(`/api/exchanges/${encodeURIComponent(provider)}`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify(payload),
+    });
+    activeExchangeStatus = data.exchange;
+    await loadExchanges();
+    closeExchangeSettings();
+    addLog('success', `${exchangeNameFor(provider)} API settings saved.`);
+    loadExchangePositions({ forced:true }).catch(() => {});
+  } catch (err) {
+    $('exchange-settings-status').innerHTML = `<span class="neg">${esc(err.message)}</span>`;
+    addLog('error', `Exchange settings save failed: ${err.message}`);
+  }
 }
 function openEditor () {
   $('pine-editor-modal').classList.add('open');
@@ -616,6 +984,7 @@ function resetEditor () {
   $('script-name').value = 'Uploaded Pine Strategy';
   $('pine-code').value = '';
   $('editor-mode').textContent = 'New script';
+  setRuntimeOptions(getRuntimeOptions(), 'editor');
   const file = $('pine-file');
   if (file) file.value = '';
 }
@@ -630,6 +999,7 @@ async function editSelected () {
   const script = await api(`/api/pine/scripts/${selectedPineScriptId}`);
   $('script-name').value = script.name || 'Uploaded Pine Strategy';
   $('pine-code').value = script.code || '';
+  setRuntimeOptions(script, 'editor');
   $('editor-mode').textContent = `Editing copy of ${script.name || 'selected script'}`;
   updatePineConfig({ id: script.id, name: script.name, code: script.code, meta: script.meta });
   openEditor();
@@ -664,15 +1034,15 @@ async function uploadScript (autoStart) {
   const name = $('script-name').value.trim() || 'Uploaded Pine Strategy';
   const code = $('pine-code').value.trim();
   if (!code) return addLog('error', 'Pine upload failed: code is empty.');
-  const capital = Number($('capital').value) || 10000;
-  const risk = Number($('risk').value) || 2;
+  const opts = getRuntimeOptions('editor');
   try {
     const data = await api('/api/pine/upload', {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body:JSON.stringify({ name, code, capital, risk, autoStart, setActive:autoStart }),
+      body:JSON.stringify({ name, code, ...opts, autoStart, setActive:autoStart }),
     });
     selectedPineScriptId = data.id;
+    setRuntimeOptions(opts);
     updatePineConfig({ id:data.id, name, code, meta:data.meta });
     await loadScripts();
     await loadSelectedRuntime();
@@ -685,13 +1055,12 @@ async function uploadScript (autoStart) {
 
 async function activateSelected () {
   if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
-  const capital = Number($('capital').value) || 10000;
-  const riskPerTradePct = Number($('risk').value) || 2;
+  const opts = getRuntimeOptions();
   try {
     const data = await api(`/api/pine/scripts/${selectedPineScriptId}/activate`, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body:JSON.stringify({ capital, riskPerTradePct }),
+      body:JSON.stringify({ ...opts, riskPerTradePct:opts.risk }),
     });
     updatePineConfig({ id:data.id, meta:data.meta });
     await loadScripts();
@@ -704,11 +1073,12 @@ async function activateSelected () {
 
 async function startBot () {
   if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
+  const opts = getRuntimeOptions();
   try {
     await api(`/api/pine/scripts/${selectedPineScriptId}/start`, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body:JSON.stringify({ capital:Number($('capital').value) || 10000, risk:Number($('risk').value) || 2 }),
+      body:JSON.stringify(opts),
     });
     await loadSelectedRuntime();
     addLog('success', 'Pine bot started.');
@@ -750,10 +1120,11 @@ async function resetBot () {
   if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
   if (!confirm('Reset Pine bot session?')) return;
   try {
+    const opts = getRuntimeOptions();
     await api(`/api/pine/scripts/${selectedPineScriptId}/reset`, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body:JSON.stringify({ capital:Number($('capital').value) || 10000, risk:Number($('risk').value) || 2 }),
+      body:JSON.stringify(opts),
     });
     await loadSelectedRuntime();
     addLog('warn', 'Pine bot reset.');
@@ -763,11 +1134,12 @@ async function resetBot () {
 }
 async function newBot () {
   if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
+  const opts = getRuntimeOptions();
   try {
     await api(`/api/pine/scripts/${selectedPineScriptId}/new`, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body:JSON.stringify({ capital:Number($('capital').value) || 10000, risk:Number($('risk').value) || 2 }),
+      body:JSON.stringify(opts),
     });
     await loadSelectedRuntime();
     addLog('success', 'New Pine 24hr bot session started.');
@@ -779,39 +1151,19 @@ async function newBot () {
 function applySessionInfo (info) {
   if (!info) {
     $('session-badge').textContent = 'No session';
-    $('session-info').textContent = '--';
     return;
   }
   const state = !info.isRunning ? 'STOPPED' : info.paused ? 'PAUSED' : 'RUNNING';
   $('session-badge').textContent = state;
-  $('session-info').textContent = `${info.shortId || '--'} / ${fmtUSD(info.currentCapital)} / risk ${info.riskPerTradePct || 2}%`;
 }
 function renderPosition (pos) {
-  if (!pos) {
-    $('position-state').textContent = 'Flat';
-    $('position-box').className = 'position-box muted';
-    $('position-box').textContent = 'No active position.';
-    return;
-  }
-  $('position-state').innerHTML = `<span class="${pos.type === 'long' ? 'pos' : 'neg'}">${pos.type.toUpperCase()}</span>`;
-  let unreal = 0;
-  if (currentPrice) {
-    unreal = pos.type === 'long' ? (currentPrice - pos.entry) * pos.qty : (pos.entry - currentPrice) * pos.qty;
-  }
-  $('position-box').className = 'position-box';
-  $('position-box').innerHTML = `
-    <span class="badge ${pos.type === 'long' ? 'long' : 'short'}">${pos.type.toUpperCase()}</span>
-    <div class="position-grid">
-      <div><div class="label">Entry</div><div class="small-value">${fmtUSD(pos.entry)}</div></div>
-      <div><div class="label">Qty</div><div class="small-value">${Number(pos.qty || 0).toFixed(5)}</div></div>
-      <div><div class="label">Trail SL</div><div class="small-value neg">${fmtUSD(pos.trailSl)}</div></div>
-      <div><div class="label">TP</div><div class="small-value pos">${fmtUSD(pos.tp)}</div></div>
-      <div><div class="label">Unrealized</div><div class="small-value ${unreal >= 0 ? 'pos' : 'neg'}">${unreal >= 0 ? '+' : ''}${fmtUSD(unreal)}</div></div>
-    </div>`;
+  renderChartPosition(pos);
 }
 function renderTrades (trades = []) {
-  $('trade-count').textContent = `${trades.length} trade${trades.length === 1 ? '' : 's'}`;
-  $('trade-body').innerHTML = trades.length
+  const body = $('trade-body');
+  if (!body) return;
+  if ($('trade-count')) $('trade-count').textContent = `${trades.length} trade${trades.length === 1 ? '' : 's'}`;
+  body.innerHTML = trades.length
     ? trades.slice(0, 120).map(t => {
       const pnlClass = t.pnl >= 0 ? 'pos' : 'neg';
       const reasonClass = t.reason === 'take_profit' ? 'tp' : t.reason === 'stop_loss' ? 'sl' : 'saved';
@@ -830,12 +1182,7 @@ function renderTrades (trades = []) {
 }
 function applyStats (s = {}, updateMarkers = true) {
   latestStats = s;
-  $('m-pnl').innerHTML = `<span class="${s.totalPnl >= 0 ? 'pos' : 'neg'}">${s.totalPnl >= 0 ? '+' : ''}${fmtUSD(s.totalPnl)}</span>`;
-  $('m-ret').innerHTML = `<span class="${s.totalReturn >= 0 ? 'pos' : 'neg'}">${fmtPct(s.totalReturn)}</span>`;
-  $('m-day').innerHTML = `<span class="${s.dayPnl >= 0 ? 'pos' : 'neg'}">${s.dayPnl >= 0 ? '+' : ''}${fmtUSD(s.dayPnl)}</span>`;
-  $('m-trades').textContent = s.totalTrades ?? 0;
-  $('m-wr').textContent = s.totalTrades ? Number(s.winRate || 0).toFixed(1) + '%' : '--';
-  $('m-pf').textContent = s.profitFactor === Infinity ? 'Inf' : s.profitFactor > 0 ? Number(s.profitFactor).toFixed(2) : '--';
+  if (s.indicatorSnaps && rawCandles.length) renderCandles(rawCandles);
   if (s.position !== undefined) renderPosition(s.position);
   if (s.recentTrades) {
     renderTrades(s.recentTrades);
@@ -870,19 +1217,19 @@ async function loadSelectedRuntime () {
 }
 
 async function runBacktest () {
+  if (!$('backtest-from') || !$('backtest-to') || !$('backtest-report')) return;
   const fromDate = $('backtest-from').value;
   const toDate = $('backtest-to').value;
   if (!fromDate || !toDate) return addLog('error', 'Choose a backtest date range.');
   const code = $('pine-code').value.trim();
   const name = $('script-name').value.trim() || 'Backtest Pine';
-  const capital = Number($('capital').value) || 10000;
-  const risk = Number($('risk').value) || 2;
+  const opts = getRuntimeOptions();
   if (!selectedPineScriptId && !code) return addLog('error', 'Select a saved script or paste Pine code first.');
   $('backtest-report').textContent = 'Running backtest...';
   try {
     const payload = selectedPineScriptId
-      ? { scriptId:selectedPineScriptId, fromDate, toDate, capital, risk }
-      : { code, name, fromDate, toDate, capital, risk };
+      ? { scriptId:selectedPineScriptId, fromDate, toDate, ...opts }
+      : { code, name, fromDate, toDate, ...opts };
     const data = await api('/api/pine/backtest', {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
@@ -909,7 +1256,164 @@ async function runBacktest () {
   }
 }
 
+const pnlCls = n => Number(n) > 0 ? 'pos' : (Number(n) < 0 ? 'neg' : '');
+const badge = (txt, kind) => `<span class="badge ${esc(kind || '')}">${esc(txt || '--')}</span>`;
+const fmtTime = v => v ? new Date(v).toLocaleString([], { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '--';
+
+function setPnlMetric (id, value) {
+  const el = $(id);
+  if (!el) return;
+  el.className = `metric-value ${pnlCls(value)}`;
+  el.textContent = fmtUSD(value);
+}
+
+function renderPositionSummary (data = {}) {
+  const s = data.summary || {};
+  $('pos-open-count').textContent = s.openCount ?? 0;
+  $('pos-closed-count').textContent = s.closedCount ?? 0;
+  setPnlMetric('pos-open-pnl', s.openPnl || 0);
+  setPnlMetric('pos-closed-pnl', s.closedPnl || 0);
+  setPnlMetric('pos-net-pnl', s.netPnl || 0);
+  const delta = data.delta || {};
+  const backend = delta.backendSync || {};
+  lastBackendExchangeSync = backend.latest || lastBackendExchangeSync;
+  const deltaPill = $('positions-delta-pill');
+  const syncedAt = delta.lastSyncAt || lastBackendExchangeSync?.syncedAt;
+  const synced = syncedAt ? ` ${new Date(syncedAt).toLocaleTimeString()}` : '';
+  deltaPill.textContent = delta.enabled ? `DELTA ON ${delta.productSymbol || ''}${synced}` : 'DELTA OFF';
+  const syncErrors = [
+    ...(delta.syncErrors || []),
+    ...(lastBackendExchangeSync?.errors || []),
+    ...(delta.lastError ? [delta.lastError] : []),
+  ];
+  deltaPill.className = `pill ${delta.enabled && !syncErrors.length ? 'pos' : 'neg'}`;
+  const bot = data.botStatus || {};
+  const running = Number(bot.runningCount || 0);
+  $('positions-bot-pill').textContent = running ? `BOTS ${running} LIVE / PINE ${bot.pine?.runningCount || 0}` : 'BOTS STOPPED';
+  $('positions-bot-pill').className = `pill ${running ? 'pos' : ''}`;
+  const backendText = lastBackendExchangeSync?.syncedAt ? ` / backend ${new Date(lastBackendExchangeSync.syncedAt).toLocaleTimeString()}` : '';
+  $('positions-updated-at').textContent = `${data.source === 'delta' ? 'Exchange synced' : 'Local data'} ${new Date().toLocaleTimeString()}${backendText}`;
+}
+
+function renderExchangeOpen (rows = []) {
+  $('positions-open-body').innerHTML = rows.length ? rows.map(p => `
+    <tr>
+      <td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td>
+      <td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${Number(p.size || p.qty || 0).toFixed(0)}</td>
+      <td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td>
+      <td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td>
+    </tr>`).join('') : '<tr><td colspan="10" class="muted">No open positions.</td></tr>';
+}
+
+function renderExchangeClosed (rows = []) {
+  $('positions-closed-sub').textContent = `${rows.length} closed`;
+  $('positions-closed-body').innerHTML = rows.length ? rows.map(t => `
+    <tr>
+      <td>${badge('closed','closed')}</td><td>${esc(t.strategyName || '--')}</td><td>${badge(t.type,t.type)}</td>
+      <td>${fmtUSD(t.entry)}</td><td>${fmtUSD(t.exit)}</td><td>${Number(t.size || t.qty || 0).toFixed(0)}</td>
+      <td class="${pnlCls(t.pnl)}">${fmtUSD(t.pnl)}</td><td class="${pnlCls(t.pnlPct)}">${fmtPct(t.pnlPct)}</td>
+      <td>${esc(t.reason || '--')}</td><td>${fmtTime(t.exitTime)}</td><td>${esc(t.shortId || '--')}</td>
+    </tr>`).join('') : '<tr><td colspan="11" class="muted">No closed positions.</td></tr>';
+}
+
+function renderExchangeOrders (rows = []) {
+  $('positions-orders-body').innerHTML = rows.length ? rows.map(o => `
+    <tr>
+      <td class="${o.status === 'sent' ? 'pos' : (o.status === 'failed' ? 'neg' : 'warn')}">${esc(String(o.status || '--').toUpperCase())}</td>
+      <td>${esc(o.action || '--')}</td><td>${esc(o.strategyName || o.runnerId || '--')}</td><td>${esc(o.side || '--')}</td>
+      <td>${esc(o.productSymbol || '--')}</td><td>${Number(o.size || 0).toFixed(0)}</td><td>${Number(o.requestedQty || 0).toFixed(0)}</td>
+      <td class="neg">${esc(o.error || '')}</td><td>${fmtTime(o.createdAt)}</td>
+    </tr>`).join('') : '<tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr>';
+}
+
+function updateExchangeSyncCountdown () {
+  const pill = $('positions-countdown-pill');
+  if (!pill) return;
+  if (exchangeSyncInFlight) {
+    pill.textContent = 'SYNCING...';
+    pill.className = 'pill warn';
+    return;
+  }
+  if (!nextExchangeSyncAt) {
+    pill.textContent = 'NEXT SYNC --';
+    pill.className = 'pill';
+    return;
+  }
+  const secs = Math.max(0, Math.ceil((nextExchangeSyncAt - Date.now()) / 1000));
+  pill.textContent = `NEXT SYNC ${secs}s`;
+  pill.className = `pill ${secs <= 5 ? 'warn' : ''}`;
+}
+
+function scheduleNextExchangeSync () {
+  nextExchangeSyncAt = Date.now() + EXCHANGE_SYNC_INTERVAL_MS;
+  updateExchangeSyncCountdown();
+}
+
+function syncSelectedPineFromExchange (data = {}) {
+  const script = selectedScript();
+  if (!script?.exchangeEnabled || data.source !== 'delta') {
+    selectedExchangeState = null;
+    updateChartState();
+    return;
+  }
+  const selected = data.selected || {};
+  const openRows = selected.open || [];
+  const closedRows = selected.closed || [];
+  const summary = selected.summary || {};
+  const position = openRows[0] || null;
+  selectedExchangeState = {
+    pnl: Number(summary.netPnl ?? ((summary.openPnl || 0) + (summary.closedPnl || 0))),
+    openPnl: Number(summary.openPnl || 0),
+    closedPnl: Number(summary.closedPnl || 0),
+    position: position ? { ...position, markPrice: currentPrice || position.markPrice } : null,
+    closedRows,
+  };
+  updateChartState();
+}
+
+async function loadExchangePositions ({ forced = false } = {}) {
+  if (exchangeSyncInFlight) return;
+  exchangeSyncInFlight = true;
+  updateExchangeSyncCountdown();
+  const forceBtn = $('force-sync-btn');
+  if (forceBtn) forceBtn.disabled = true;
+  try {
+    const params = new URLSearchParams({ limit:'1000' });
+    if (selectedPineScriptId) params.set('pineScriptId', selectedPineScriptId);
+    if (forced) params.set('force', '1');
+    const data = await api(`/api/positions?${params.toString()}`);
+    renderPositionSummary(data);
+    renderExchangeOpen(data.open || []);
+    renderExchangeClosed(data.closed || []);
+    renderExchangeOrders(data.exchangeOrders || []);
+    syncSelectedPineFromExchange(data);
+    scheduleNextExchangeSync();
+    if (forced) addLog('success', 'Exchange force sync completed.');
+  } catch (err) {
+    selectedExchangeState = null;
+    updateChartState();
+    $('positions-updated-at').textContent = `Sync failed: ${err.message}`;
+    scheduleNextExchangeSync();
+  } finally {
+    exchangeSyncInFlight = false;
+    if (forceBtn) forceBtn.disabled = false;
+    updateExchangeSyncCountdown();
+  }
+}
+
+function forceExchangeSync () {
+  loadExchangePositions({ forced:true });
+}
+
+function maybeAutoExchangeSync () {
+  updateExchangeSyncCountdown();
+  if (!exchangeSyncInFlight && nextExchangeSyncAt && Date.now() >= nextExchangeSyncAt) {
+    loadExchangePositions();
+  }
+}
+
 async function loadInitial () {
+  try { await loadExchanges(); } catch (err) { addLog('error', `Could not load exchanges: ${err.message}`); }
   try {
     const cfg = await api('/api/pine/config');
     updatePineConfig(cfg);
@@ -920,11 +1424,14 @@ async function loadInitial () {
   } catch (err) {}
   try { await loadScripts(); } catch (err) { addLog('error', `Could not load scripts: ${err.message}`); }
   await loadSelectedRuntime();
+  await loadExchangePositions();
 }
 
 socket.on('ticker', t => {
   currentPrice = Number(t.price);
   $('price').textContent = fmtUSD(t.price);
+  if (selectedExchangeState?.position) selectedExchangeState.position.markPrice = currentPrice;
+  updateChartState();
 });
 socket.on('candles', renderCandles);
 socket.on('candle_tick', onCandleTick);
@@ -935,6 +1442,13 @@ socket.on('ws_status', s => {
   $('ws-ticker').className = s.ticker ? 'pos' : 'neg';
 });
 socket.on('all_status', status => updateHeaderStatus(status.pine || {}));
+socket.on('exchange:sync', sync => {
+  lastBackendExchangeSync = sync || null;
+  const errCount = Array.isArray(sync?.errors) ? sync.errors.length : 0;
+  $('positions-updated-at').textContent = errCount
+    ? `Backend exchange sync failed ${new Date().toLocaleTimeString()}`
+    : `Backend exchange synced ${sync?.syncedAt ? new Date(sync.syncedAt).toLocaleTimeString() : new Date().toLocaleTimeString()}`;
+});
 socket.on('pine:status', updateHeaderStatus);
 socket.on('pine:runner_event', payload => {
   if (!payload?.scriptId) return;
@@ -979,19 +1493,42 @@ window.addEventListener('load', () => {
     $('pine-code').value = await file.text();
     $('editor-mode').textContent = `Loaded file ${file.name}`;
   });
+  $('exchange-settings-provider').addEventListener('change', e => {
+    const provider = e.target.value || 'delta-demo';
+    const status = exchanges.find(x => x.provider === provider) || {};
+    $('exchange-provider').value = provider;
+    $('exchange-settings-enabled').checked = Boolean(status.enabled);
+    $('exchange-api-key').value = '';
+    $('exchange-api-secret').value = '';
+    $('exchange-base-url').value = status.baseUrl || 'https://cdn-ind.testnet.deltaex.org';
+    $('exchange-product-symbol').value = status.productSymbol || 'BTCUSD';
+    $('exchange-product-id').value = status.productId || '';
+    $('exchange-settings-mode').textContent = status.name || exchangeNameFor(provider);
+    $('exchange-settings-status').innerHTML = status.configured
+      ? `Saved key: <b>${esc(status.maskedApiKey || 'configured')}</b> / Source: ${esc(status.credentialSource || 'database')}`
+      : 'No saved API key for this exchange.';
+  });
   $('pine-editor-modal').addEventListener('click', e => {
     if (e.target.id === 'pine-editor-modal') closeEditor();
   });
+  $('exchange-settings-modal').addEventListener('click', e => {
+    if (e.target.id === 'exchange-settings-modal') closeExchangeSettings();
+  });
   window.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeEditor();
+    if (e.key === 'Escape') {
+      closeEditor();
+      closeExchangeSettings();
+    }
   });
   const now = new Date();
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  $('backtest-to').value = now.toISOString().slice(0, 10);
-  $('backtest-from').value = weekAgo.toISOString().slice(0, 10);
+  if ($('backtest-to')) $('backtest-to').value = now.toISOString().slice(0, 10);
+  if ($('backtest-from')) $('backtest-from').value = weekAgo.toISOString().slice(0, 10);
   updateHeaderStatus();
   updateStatus();
   loadInitial();
+  scheduleNextExchangeSync();
+  setInterval(maybeAutoExchangeSync, 1000);
   addLog('info', 'Pine Upload Bot page ready.');
 });
 </script>
