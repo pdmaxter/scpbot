@@ -660,7 +660,7 @@ function applyStats (id, s) {
 
   if (s.recentTrades) rebuildTradeLog(id, s.recentTrades);
   if (s.equityHistory?.length > 1)
-    equitySeries[id].setData(s.equityHistory.map(e => ({ time: Math.floor(e.time/1000), equity: e.equity })));
+    equitySeries[id].setData(s.equityHistory.map(e => ({ time: Math.floor(e.time/1000), value: e.equity })));
 }
 
 // ═══════════════════════════════════════════════════════════════════

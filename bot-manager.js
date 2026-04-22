@@ -88,6 +88,9 @@ class StrategyRunner {
       }).catch(e => console.error(`[${id}] Session update failed:`, e.message));
 
       await Position.deleteOne({ sessionId: this.sessionId }).catch(() => {});
+
+      const sessInfo = await this.buildSessionInfo().catch(() => null);
+      if (sessInfo) this.emit('session_info', sessInfo);
     });
 
     s.on('day_summary', async d => {

@@ -292,10 +292,14 @@ class ScalpingStrategy extends EventEmitter {
     const pnl = type === 'long'
       ? (exitPrice - entry) * qty
       : (entry - exitPrice) * qty;
+    const capitalBefore = this.capital;
     this.capital += pnl;
+    // Update the equity history point for this candle to reflect the closed trade
+    if (this.equityHistory.length > 0)
+      this.equityHistory[this.equityHistory.length - 1].equity = this.capital;
     const trade = {
       id: this.trades.length + 1, type, entry, exit: exitPrice, qty,
-      pnl, pnlPct: pnl / (entry * qty) * 100,
+      pnl, pnlPct: pnl / capitalBefore * 100,
       entryTime, exitTime, reason, sl, tp,
     };
     this.trades.push(trade);
