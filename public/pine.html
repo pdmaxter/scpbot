@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pine Upload Bot</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+:root {
+  --bg:#0b0d14; --panel:#12141f; --panel2:#181a28; --line:#252840;
+  --text:#c9cde0; --muted:#6a708f; --green:#00e676; --red:#ff3d57;
+  --blue:#2979ff; --yellow:#ffd740; --pink:#f48fb1; --orange:#ff9100;
+  --font:'Segoe UI',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
+body{overflow-x:hidden}
+.page{min-height:100vh;display:grid;grid-template-rows:56px 1fr}
+.header{display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.brand{font-size:15px;font-weight:900;letter-spacing:.02em;white-space:nowrap}
+.brand span{color:var(--pink)}
+.price{font-size:18px;font-weight:900;font-variant-numeric:tabular-nums}
+.spacer{flex:1}
+.status-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.04em;color:var(--muted)}
+.pill.mode{background:#f48fb118;border-color:#f48fb144;color:var(--pink)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;background:var(--red)}
+.dot.live{background:var(--green);box-shadow:0 0 6px var(--green)}
+.dot.warm{background:var(--yellow);box-shadow:0 0 6px var(--yellow)}
+.link-btn,.ghost-btn,.solid-btn,.danger-btn{border-radius:4px;border:1px solid var(--line);padding:6px 10px;font-size:11px;font-weight:800;letter-spacing:.02em;text-decoration:none;cursor:pointer;white-space:nowrap}
+.link-btn{background:#2979ff18;color:var(--blue);border-color:#2979ff40}
+.ghost-btn{background:#25284080;color:var(--text)}
+.solid-btn{background:#00e676;color:#06120a;border-color:#00e676}
+.danger-btn{background:#ff3d57;color:#fff;border-color:#ff3d57}
+button:disabled{opacity:.35;cursor:not-allowed}
+.main{display:grid;grid-template-columns:minmax(320px,430px) minmax(0,1fr);gap:12px;padding:12px;max-width:1500px;width:100%;margin:0 auto}
+.stack{display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.panel-title{font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.panel-body{padding:12px}
+.muted{color:var(--muted)}
+.pos{color:var(--green)} .neg{color:var(--red)} .warn{color:var(--yellow)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:.04em;text-transform:uppercase}
+.inp,.code{width:100%;background:#0d101a;border:1px solid var(--line);border-radius:4px;color:var(--text);font:inherit;padding:8px;outline:none}
+.inp:focus,.code:focus{border-color:var(--pink)}
+.code{height:330px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.45}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.script-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--panel2);max-height:300px;overflow-y:auto}
+.script-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 10px;border-bottom:1px solid var(--line);cursor:pointer}
+.script-row:last-child{border-bottom:0}
+.script-row:hover,.script-row.active{background:#202335}
+.script-name{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.script-meta{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{display:inline-flex;align-items:center;border-radius:3px;padding:2px 6px;font-size:10px;font-weight:900}
+.badge.active{background:#00e67618;color:var(--green)}
+.badge.saved{background:#5a608018;color:var(--muted)}
+.badge.long{background:#00e67618;color:var(--green)}
+.badge.short{background:#ff3d5718;color:var(--red)}
+.badge.tp{background:#2979ff18;color:var(--blue)}
+.badge.sl{background:#ff910018;color:var(--orange)}
+.status-card{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:10px;min-height:62px}
+.metric{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:9px 10px}
+.metric-label{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.metric-value{font-size:18px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
+.small-value{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
+.position-box{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:10px;min-height:94px}
+.position-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+.chart-wrap{height:360px;position:relative;background:#0b0d14}
+#price-chart{height:100%;width:100%}
+.chart-state{position:absolute;left:12px;top:12px;z-index:2;background:#0b0d14d9;border:1px solid var(--line);border-radius:4px;padding:8px 10px;min-width:220px;pointer-events:none}
+.chart-state-title{font-size:10px;color:var(--muted);font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+.chart-state-main{font-size:13px;font-weight:900;margin-top:3px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chart-state-sub{display:flex;gap:8px;flex-wrap:wrap;margin-top:5px;font-size:11px;color:var(--muted)}
+.table-wrap{overflow:auto;max-height:285px;border:1px solid var(--line);border-radius:4px;background:var(--panel2)}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{position:sticky;top:0;background:#151827;color:var(--muted);font-size:10px;text-align:left;padding:7px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px;border-bottom:1px solid #1d2032;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.report{margin-top:10px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:10px;min-height:88px}
+.log{height:190px;overflow:auto;background:#0d101a;border:1px solid var(--line);border-radius:4px}
+.log-line{display:grid;grid-template-columns:72px 1fr;gap:8px;padding:6px 8px;border-bottom:1px solid #1d2032;font-size:11px}
+.log-line:last-child{border-bottom:0}
+.log-time{color:var(--muted)}
+.empty{color:var(--muted);padding:14px;text-align:center}
+.modal-backdrop{position:fixed;inset:0;background:#05070bcc;display:none;align-items:center;justify-content:center;padding:18px;z-index:20}
+.modal-backdrop.open{display:flex}
+.modal{width:min(840px,100%);max-height:90vh;background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 18px 60px #0008;display:flex;flex-direction:column;overflow:hidden}
+.modal-head{display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--panel2);border-bottom:1px solid var(--line)}
+.modal-title{font-size:12px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.modal-body{padding:14px;overflow:auto}
+.modal-foot{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:12px 14px;background:var(--panel2);border-top:1px solid var(--line)}
+@media (max-width:1000px){
+  .page{grid-template-rows:auto 1fr}
+  .header{position:static;align-items:flex-start;padding:12px;flex-wrap:wrap}
+  .main{grid-template-columns:1fr}
+  .position-grid,.grid3{grid-template-columns:1fr 1fr}
+}
+@media (max-width:560px){
+  .grid2,.grid3,.position-grid{grid-template-columns:1fr}
+  .status-strip{justify-content:flex-start}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="header">
+    <div class="brand"><span>PINE</span> Upload Bot</div>
+    <div class="price" id="price">--</div>
+    <div class="spacer"></div>
+    <div class="status-strip">
+      <span class="pill mode">PAPER</span>
+      <span class="pill"><span class="dot" id="pine-dot"></span><span id="pine-label">STOPPED</span></span>
+      <span class="pill">K <span id="ws-kline" class="neg">OFF</span></span>
+      <span class="pill">T <span id="ws-ticker" class="neg">OFF</span></span>
+      <a class="link-btn" href="/">Dashboard</a>
+      <form method="POST" action="/logout" style="margin:0">
+        <button class="ghost-btn" type="submit">Logout</button>
+      </form>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="stack">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Running / Saved Pine Strategies</div>
+          <button class="solid-btn" type="button" onclick="newEditor()">Add Pine</button>
+        </div>
+        <div class="panel-body">
+          <div id="script-list" class="script-list"><div class="empty">Loading saved Pine scripts...</div></div>
+          <div class="grid2" style="margin-top:10px">
+            <div class="field">
+              <label class="label" for="capital">Capital</label>
+              <input class="inp" id="capital" type="number" value="10000" min="100" step="100">
+            </div>
+            <div class="field">
+              <label class="label" for="risk">Risk per trade %</label>
+              <input class="inp" id="risk" type="number" value="2" min="0.1" max="20" step="0.1">
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="solid-btn" type="button" onclick="activateSelected()">Activate Selected</button>
+            <button class="link-btn" type="button" onclick="newBot()">Run Selected</button>
+            <button class="ghost-btn" type="button" onclick="editSelected()">Edit</button>
+            <button class="danger-btn" type="button" onclick="deleteSelected()">Delete Selected</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="stack">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">BTC Candles / Selected Pine State</div>
+          <div class="muted" id="chart-last">Waiting for candles</div>
+        </div>
+        <div class="chart-wrap">
+          <div id="chart-state" class="chart-state">
+            <div class="chart-state-title">Selected Pine</div>
+            <div class="chart-state-main" id="chart-script">No script selected</div>
+            <div class="chart-state-sub">
+              <span id="chart-run-state">Stopped</span>
+              <span id="chart-pos-state">Flat</span>
+              <span id="chart-pnl-state">P&L --</span>
+            </div>
+          </div>
+          <div id="price-chart"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Live Pine Bot</div>
+          <div class="muted" id="session-badge">No session</div>
+        </div>
+        <div class="panel-body">
+          <div id="script-status" class="status-card muted">No Pine script loaded.</div>
+          <div class="btn-row">
+            <button class="solid-btn" id="btn-start" type="button" onclick="startBot()">Start</button>
+            <button class="danger-btn" id="btn-stop" type="button" onclick="stopBot()">Stop</button>
+            <button class="ghost-btn" id="btn-pause" type="button" onclick="pauseBot()">Pause</button>
+            <button class="ghost-btn" id="btn-resume" type="button" onclick="resumeBot()">Resume</button>
+            <button class="link-btn" type="button" onclick="newBot()">New 24hr Bot</button>
+            <button class="ghost-btn" type="button" onclick="resetBot()">Reset</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Date Range Backtest</div>
+          <button class="solid-btn" type="button" onclick="runBacktest()">Run Backtest</button>
+        </div>
+        <div class="panel-body">
+          <div class="grid2">
+            <div class="field">
+              <label class="label" for="backtest-from">From</label>
+              <input class="inp" id="backtest-from" type="date">
+            </div>
+            <div class="field">
+              <label class="label" for="backtest-to">To</label>
+              <input class="inp" id="backtest-to" type="date">
+            </div>
+          </div>
+          <div id="backtest-report" class="report muted">Select a saved script, or add Pine code from the popup, then choose dates and run a backtest.</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Performance</div>
+          <div class="muted" id="session-info">--</div>
+        </div>
+        <div class="panel-body">
+          <div class="grid3">
+            <div class="metric"><div class="metric-label">Net P&L</div><div class="metric-value" id="m-pnl">--</div></div>
+            <div class="metric"><div class="metric-label">Return</div><div class="metric-value" id="m-ret">--</div></div>
+            <div class="metric"><div class="metric-label">Day P&L</div><div class="metric-value" id="m-day">--</div></div>
+            <div class="metric"><div class="metric-label">Trades</div><div class="metric-value" id="m-trades">0</div></div>
+            <div class="metric"><div class="metric-label">Win Rate</div><div class="metric-value" id="m-wr">--</div></div>
+            <div class="metric"><div class="metric-label">Profit Factor</div><div class="metric-value" id="m-pf">--</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Open Position</div>
+          <div class="muted" id="position-state">Flat</div>
+        </div>
+        <div class="panel-body">
+          <div id="position-box" class="position-box muted">No active position.</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Closed Trades</div>
+          <div class="muted" id="trade-count">0 trades</div>
+        </div>
+        <div class="panel-body">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>ID</th><th>Side</th><th>Entry</th><th>Exit</th><th>P&L</th><th>%</th><th>Reason</th><th>Time</th></tr>
+              </thead>
+              <tbody id="trade-body"><tr><td colspan="8" class="muted">No closed trades.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Activity</div>
+          <button class="ghost-btn" type="button" onclick="clearLog()">Clear</button>
+        </div>
+        <div class="panel-body">
+          <div id="log" class="log"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="modal-backdrop" id="pine-editor-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pine-editor-title">
+    <div class="modal-head">
+      <div class="modal-title" id="pine-editor-title">Upload / Edit Pine Code</div>
+      <div class="spacer"></div>
+      <div class="muted" id="editor-mode">New script</div>
+      <button class="ghost-btn" type="button" onclick="closeEditor()">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="label" for="script-name">Script name</label>
+        <input class="inp" id="script-name" value="Uploaded Pine Strategy">
+      </div>
+      <div class="field" style="margin-top:8px">
+        <label class="label" for="pine-file">Upload .pine or .txt</label>
+        <input class="inp" id="pine-file" type="file" accept=".pine,.txt,.pinescript,text/plain">
+      </div>
+      <div class="field" style="margin-top:8px">
+        <label class="label" for="pine-code">Pine strategy or indicator code</label>
+        <textarea class="code" id="pine-code" spellcheck="false" placeholder="// Paste TradingView Pine code here"></textarea>
+      </div>
+      <div class="muted" style="margin-top:8px;line-height:1.45">
+        Supported Pine is parsed into bot signals. The server does not execute arbitrary script code.
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost-btn" type="button" onclick="closeEditor()">Cancel</button>
+      <button class="ghost-btn" type="button" onclick="uploadScript(false)">Save Script</button>
+      <button class="solid-btn" type="button" onclick="uploadScript(true)">Save & Run 24hr Bot</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const socket = io();
+let selectedPineScriptId = null;
+let pineScripts = [];
+let aggregateState = { running:false, paused:false, warmedUp:false, runningCount:0 };
+let runningState = { running:false, paused:false, warmedUp:false };
+let currentPrice = null;
+let rawCandles = [];
+let latestStats = {};
+let priceChart = null;
+let candleSeries = null;
+let emaFastSeries = null;
+let emaSlowSeries = null;
+let vwapSeries = null;
+let chartMarkers = [];
+let positionLines = {};
+
+function esc (value) {
+  return String(value ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m]));
+}
+function fmtUSD (n) {
+  const v = Number(n || 0);
+  return (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function fmtPct (n) {
+  const v = Number(n || 0);
+  return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+}
+function fmtDT (ts) {
+  if (!ts) return '--';
+  return new Date(ts).toLocaleString([], { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+async function api (path, opts = {}) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function addLog (level, msg) {
+  const row = document.createElement('div');
+  row.className = 'log-line';
+  const cls = level === 'error' ? 'neg' : level === 'success' ? 'pos' : level === 'warn' ? 'warn' : '';
+  row.innerHTML = `<div class="log-time">${fmtDT(Date.now())}</div><div class="${cls}">${esc(msg)}</div>`;
+  $('log').prepend(row);
+  while ($('log').children.length > 120) $('log').lastChild.remove();
+}
+function clearLog () {
+  $('log').innerHTML = '';
+}
+
+function selectedScript () {
+  return pineScripts.find(s => s.id === selectedPineScriptId) || null;
+}
+function selectedScriptIsLive () {
+  const script = selectedScript();
+  return Boolean(script?.status?.running || script?.isActive);
+}
+
+const LC_THEME = {
+  layout:{ background:{ color:'#0b0d14' }, textColor:'#8892b0' },
+  grid:{ vertLines:{ color:'#181a28' }, horzLines:{ color:'#181a28' } },
+  crosshair:{ mode:1 },
+  rightPriceScale:{ borderColor:'#252840' },
+  timeScale:{ borderColor:'#252840', timeVisible:true, secondsVisible:false, rightOffset:8, barSpacing:6 },
+};
+
+function initPriceChart () {
+  if (!window.LightweightCharts || priceChart) return;
+  const el = $('price-chart');
+  priceChart = LightweightCharts.createChart(el, { ...LC_THEME, width:el.clientWidth, height:el.clientHeight || 360 });
+  candleSeries = priceChart.addCandlestickSeries({
+    upColor:'#00e676', downColor:'#ff3d57',
+    borderUpColor:'#00e676', borderDownColor:'#ff3d57',
+    wickUpColor:'#00e67680', wickDownColor:'#ff3d5780',
+  });
+  emaFastSeries = priceChart.addLineSeries({ color:'#2979ff', lineWidth:1, priceLineVisible:false, lastValueVisible:false });
+  emaSlowSeries = priceChart.addLineSeries({ color:'#ff9100', lineWidth:1, priceLineVisible:false, lastValueVisible:false });
+  vwapSeries = priceChart.addLineSeries({ color:'#f48fb1', lineWidth:1, lineStyle:1, priceLineVisible:false, lastValueVisible:false });
+  new ResizeObserver(() => {
+    priceChart.applyOptions({ width:el.clientWidth, height:el.clientHeight || 360 });
+  }).observe(el);
+  if (rawCandles.length) renderCandles(rawCandles);
+}
+
+function computeEMA (values, period) {
+  if (values.length < period) return values.map(() => null);
+  const k = 2 / (period + 1);
+  const out = new Array(period - 1).fill(null);
+  let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  out.push(ema);
+  for (let i = period; i < values.length; i++) {
+    ema = values[i] * k + ema * (1 - k);
+    out.push(ema);
+  }
+  return out;
+}
+
+function computeVWAP (candles) {
+  let cp = 0, cv = 0, lastDate = null;
+  return candles.map(c => {
+    const date = new Date(c.openTime).toISOString().slice(0, 10);
+    if (date !== lastDate) { cp = 0; cv = 0; lastDate = date; }
+    cp += c.close * c.volume;
+    cv += c.volume;
+    return cv > 0 ? cp / cv : null;
+  });
+}
+
+function candleTime (c) {
+  return Math.floor(c.openTime / 1000);
+}
+function renderCandles (candles = []) {
+  rawCandles = Array.isArray(candles) ? candles.slice() : [];
+  if (!candleSeries || !rawCandles.length) return;
+  const closes = rawCandles.map(c => c.close);
+  const ema8 = computeEMA(closes, 8);
+  const ema21 = computeEMA(closes, 21);
+  const vwap = computeVWAP(rawCandles);
+  candleSeries.setData(rawCandles.map(c => ({ time:candleTime(c), open:c.open, high:c.high, low:c.low, close:c.close })));
+  emaFastSeries.setData(rawCandles.map((c, i) => ema8[i] != null ? { time:candleTime(c), value:ema8[i] } : null).filter(Boolean));
+  emaSlowSeries.setData(rawCandles.map((c, i) => ema21[i] != null ? { time:candleTime(c), value:ema21[i] } : null).filter(Boolean));
+  vwapSeries.setData(rawCandles.map((c, i) => vwap[i] != null ? { time:candleTime(c), value:vwap[i] } : null).filter(Boolean));
+  $('chart-last').textContent = fmtDT(rawCandles[rawCandles.length - 1].openTime);
+  redrawChartMarkers();
+  renderChartPosition(latestStats.position);
+  priceChart.timeScale().scrollToRealTime();
+}
+
+function onCandleTick (c) {
+  const idx = rawCandles.findIndex(x => x.openTime === c.openTime);
+  if (idx >= 0) rawCandles[idx] = c;
+  else rawCandles.push(c);
+  if (rawCandles.length > 1000) rawCandles.shift();
+  renderCandles(rawCandles);
+}
+
+function clearPositionLines () {
+  if (!candleSeries) return;
+  for (const line of Object.values(positionLines)) candleSeries.removePriceLine(line);
+  positionLines = {};
+}
+
+function renderChartPosition (pos) {
+  clearPositionLines();
+  if (!candleSeries || !pos || !selectedScriptIsLive()) return;
+  positionLines.entry = candleSeries.createPriceLine({ price:pos.entry, color:'#f48fb1', lineWidth:1, lineStyle:0, title:'PINE ENTRY' });
+  positionLines.sl = candleSeries.createPriceLine({ price:pos.trailSl || pos.sl, color:'#ff3d57', lineWidth:1, lineStyle:2, title:'PINE SL' });
+  positionLines.tp = candleSeries.createPriceLine({ price:pos.tp, color:'#00e676', lineWidth:1, lineStyle:2, title:'PINE TP' });
+}
+
+function setTradeMarkers (trades = []) {
+  if (!selectedScriptIsLive()) {
+    chartMarkers = [];
+    redrawChartMarkers();
+    return;
+  }
+  chartMarkers = trades.slice(0, 120).flatMap(t => {
+    const isLong = t.type === 'long';
+    const pnlColor = t.pnl >= 0 ? '#00e676' : '#ff3d57';
+    return [
+      {
+        time:Math.floor((t.entryTime || t.openTime || Date.now()) / 1000),
+        position:isLong ? 'belowBar' : 'aboveBar',
+        color:'#f48fb1',
+        shape:isLong ? 'arrowUp' : 'arrowDown',
+        text:`PINE ${String(t.type || '').toUpperCase()}`,
+      },
+      {
+        time:Math.floor((t.exitTime || Date.now()) / 1000),
+        position:isLong ? 'aboveBar' : 'belowBar',
+        color:pnlColor,
+        shape:'circle',
+        text:`${t.pnl >= 0 ? '+' : ''}${fmtUSD(t.pnl)}`,
+      },
+    ];
+  });
+  redrawChartMarkers();
+}
+
+function addChartMarker (time, type, pnl = null) {
+  if (!selectedScriptIsLive()) return;
+  const isLong = type === 'long';
+  chartMarkers.push({
+    time:Math.floor(time / 1000),
+    position:pnl == null ? (isLong ? 'belowBar' : 'aboveBar') : (isLong ? 'aboveBar' : 'belowBar'),
+    color:pnl == null ? '#f48fb1' : (pnl >= 0 ? '#00e676' : '#ff3d57'),
+    shape:pnl == null ? (isLong ? 'arrowUp' : 'arrowDown') : 'circle',
+    text:pnl == null ? `PINE ${String(type || '').toUpperCase()}` : `${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}`,
+  });
+  if (chartMarkers.length > 240) chartMarkers = chartMarkers.slice(-240);
+  redrawChartMarkers();
+}
+
+function redrawChartMarkers () {
+  if (!candleSeries) return;
+  candleSeries.setMarkers(chartMarkers.slice().sort((a, b) => a.time - b.time));
+}
+
+function updateChartState () {
+  const script = selectedScript();
+  $('chart-script').textContent = script?.name || 'No script selected';
+  const run = !script ? 'No strategy'
+    : runningState.running ? (runningState.paused ? 'Paused' : (runningState.warmedUp ? 'Live' : 'Warming'))
+      : script.isActive ? 'Active / stopped' : 'Saved';
+  $('chart-run-state').textContent = run;
+  const pos = selectedScriptIsLive() ? latestStats.position : null;
+  $('chart-pos-state').innerHTML = pos ? `<span class="${pos.type === 'long' ? 'pos' : 'neg'}">${pos.type.toUpperCase()}</span> @ ${fmtUSD(pos.entry)}` : 'Flat';
+  const pnl = selectedScriptIsLive() ? Number(latestStats.totalPnl || 0) : 0;
+  $('chart-pnl-state').innerHTML = `P&L <span class="${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</span>`;
+  renderChartPosition(pos);
+}
+
+function updateHeaderStatus (status = {}) {
+  aggregateState = { ...aggregateState, ...status };
+  const dot = $('pine-dot');
+  const label = $('pine-label');
+  if (aggregateState.running && aggregateState.paused) {
+    dot.className = 'dot warm';
+    label.textContent = aggregateState.runningCount > 1 ? `${aggregateState.runningCount} PAUSED` : 'PAUSED';
+    label.className = 'warn';
+  } else if (aggregateState.running) {
+    dot.className = aggregateState.warmedUp ? 'dot live' : 'dot warm';
+    label.textContent = aggregateState.runningCount > 1 ? `${aggregateState.runningCount} LIVE` : (aggregateState.warmedUp ? 'LIVE' : 'WARMING');
+    label.className = aggregateState.warmedUp ? 'pos' : 'warn';
+  } else {
+    dot.className = 'dot';
+    label.textContent = 'STOPPED';
+    label.className = '';
+  }
+}
+
+function updateStatus (status = {}) {
+  runningState = { ...runningState, ...status };
+  $('btn-start').disabled = runningState.running && !runningState.paused;
+  $('btn-stop').disabled = !runningState.running;
+  $('btn-pause').disabled = !runningState.running || runningState.paused;
+  $('btn-resume').disabled = !runningState.running || !runningState.paused;
+  updateChartState();
+}
+
+function updatePineConfig ({ id, name, code, meta } = {}) {
+  if (id !== undefined) selectedPineScriptId = id;
+  if (name !== undefined) $('script-name').value = name;
+  if (code !== undefined) $('pine-code').value = code;
+  const scriptName = name || meta?.name || 'Uploaded Pine';
+  const hasScript = Boolean(meta?.hasScript || code);
+  const warnings = meta?.warnings?.length ? `<div class="neg">${esc(meta.warnings.join(' '))}</div>` : '';
+  const longCond = meta?.longCondition ? `<div>Long: <b>${esc(meta.longCondition)}</b></div>` : '';
+  const shortCond = meta?.shortCondition ? `<div>Short: <b>${esc(meta.shortCondition)}</b></div>` : '';
+  $('script-status').innerHTML = hasScript
+    ? `<div>Loaded: <b>${esc(scriptName)}</b></div>${longCond}${shortCond}${warnings}`
+    : 'No Pine script loaded.';
+  updateChartState();
+}
+
+function renderScripts (scripts = pineScripts) {
+  pineScripts = Array.isArray(scripts) ? scripts : [];
+  if (!pineScripts.length) selectedPineScriptId = null;
+  if (pineScripts.length && !pineScripts.some(s => s.id === selectedPineScriptId)) {
+    selectedPineScriptId = pineScripts.find(s => s.status?.running)?.id || pineScripts.find(s => s.isActive)?.id || pineScripts[0].id;
+  }
+  $('script-list').innerHTML = pineScripts.length
+    ? pineScripts.map(s => {
+      const bits = [
+        s.meta?.longCondition ? 'Long' : null,
+        s.meta?.shortCondition ? 'Short' : null,
+        s.updatedAt ? fmtDT(s.updatedAt) : null,
+      ].filter(Boolean).join(' / ');
+      const activeRunning = s.status?.running;
+      const badgeText = activeRunning ? (s.status?.paused ? 'PAUSED' : 'RUNNING') : (s.isActive ? 'ACTIVE' : 'SAVED');
+      const badgeClass = activeRunning || s.isActive ? 'active' : 'saved';
+      return `<div class="script-row ${s.id === selectedPineScriptId ? 'active' : ''}" onclick="selectScript('${esc(s.id)}')">
+        <div>
+          <div class="script-name">${esc(s.name)}</div>
+          <div class="script-meta">${esc(bits || 'Saved Pine script')}</div>
+        </div>
+        <span class="badge ${badgeClass}">${badgeText}</span>
+      </div>`;
+    }).join('')
+    : '<div class="empty">No saved Pine scripts yet.</div>';
+  const selected = selectedScript();
+  updateStatus(selected?.status || { running:false, paused:false, warmedUp:false });
+  if (selected?.stats) applyStats(selected.stats, false);
+  else applyStats({ totalPnl:0, totalReturn:0, dayPnl:0, totalTrades:0, position:null, recentTrades:[] }, false);
+  applySessionInfo(selected?.session || null);
+  updateChartState();
+}
+function selectScript (id) {
+  selectedPineScriptId = id;
+  renderScripts();
+  if (!selectedScriptIsLive()) {
+    setTradeMarkers([]);
+    renderChartPosition(null);
+  } else {
+    setTradeMarkers(latestStats.recentTrades || []);
+    renderChartPosition(latestStats.position);
+  }
+  loadSelectedRuntime();
+}
+async function loadScripts () {
+  renderScripts(await api('/api/pine/runners'));
+}
+function openEditor () {
+  $('pine-editor-modal').classList.add('open');
+  setTimeout(() => $('script-name').focus(), 0);
+}
+function closeEditor () {
+  $('pine-editor-modal').classList.remove('open');
+}
+function resetEditor () {
+  $('script-name').value = 'Uploaded Pine Strategy';
+  $('pine-code').value = '';
+  $('editor-mode').textContent = 'New script';
+  const file = $('pine-file');
+  if (file) file.value = '';
+}
+function newEditor () {
+  selectedPineScriptId = null;
+  resetEditor();
+  renderScripts();
+  openEditor();
+}
+async function editSelected () {
+  if (!selectedPineScriptId) return newEditor();
+  const script = await api(`/api/pine/scripts/${selectedPineScriptId}`);
+  $('script-name').value = script.name || 'Uploaded Pine Strategy';
+  $('pine-code').value = script.code || '';
+  $('editor-mode').textContent = `Editing copy of ${script.name || 'selected script'}`;
+  updatePineConfig({ id: script.id, name: script.name, code: script.code, meta: script.meta });
+  openEditor();
+}
+
+async function deleteSelected () {
+  if (!selectedPineScriptId) return addLog('error', 'Select a Pine script to delete.');
+  const script = pineScripts.find(s => s.id === selectedPineScriptId);
+  const label = script?.name || 'selected Pine script';
+  const warning = script?.status?.running
+    ? `Delete running Pine script "${label}"? Its live Pine bot will be stopped.`
+    : script?.isActive
+    ? `Delete active Pine script "${label}"? The live Pine bot will be stopped.`
+    : `Delete Pine script "${label}"?`;
+  if (!confirm(warning)) return;
+  try {
+    const data = await api(`/api/pine/scripts/${selectedPineScriptId}`, { method:'DELETE' });
+    selectedPineScriptId = null;
+    renderScripts(data.scripts || []);
+    if (data.deletedActive) {
+      updatePineConfig({ id:null, name:'Uploaded Pine', code:'', meta:{ hasScript:false } });
+      applyStats({ totalPnl:0, totalReturn:0, dayPnl:0, totalTrades:0, position:null, recentTrades:[] });
+    }
+    if (!pineScripts.length) resetEditor();
+    addLog('success', `Deleted Pine script "${label}".`);
+  } catch (err) {
+    addLog('error', `Delete failed: ${err.message}`);
+  }
+}
+
+async function uploadScript (autoStart) {
+  const name = $('script-name').value.trim() || 'Uploaded Pine Strategy';
+  const code = $('pine-code').value.trim();
+  if (!code) return addLog('error', 'Pine upload failed: code is empty.');
+  const capital = Number($('capital').value) || 10000;
+  const risk = Number($('risk').value) || 2;
+  try {
+    const data = await api('/api/pine/upload', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({ name, code, capital, risk, autoStart, setActive:autoStart }),
+    });
+    selectedPineScriptId = data.id;
+    updatePineConfig({ id:data.id, name, code, meta:data.meta });
+    await loadScripts();
+    await loadSelectedRuntime();
+    closeEditor();
+    addLog('success', autoStart ? 'Pine script saved and live bot started.' : 'Pine script saved.');
+  } catch (err) {
+    addLog('error', `Pine upload failed: ${err.message}`);
+  }
+}
+
+async function activateSelected () {
+  if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
+  const capital = Number($('capital').value) || 10000;
+  const riskPerTradePct = Number($('risk').value) || 2;
+  try {
+    const data = await api(`/api/pine/scripts/${selectedPineScriptId}/activate`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({ capital, riskPerTradePct }),
+    });
+    updatePineConfig({ id:data.id, meta:data.meta });
+    await loadScripts();
+    await loadSelectedRuntime();
+    addLog('success', 'Pine script activated for the live bot.');
+  } catch (err) {
+    addLog('error', `Activation failed: ${err.message}`);
+  }
+}
+
+async function startBot () {
+  if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
+  try {
+    await api(`/api/pine/scripts/${selectedPineScriptId}/start`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({ capital:Number($('capital').value) || 10000, risk:Number($('risk').value) || 2 }),
+    });
+    await loadSelectedRuntime();
+    addLog('success', 'Pine bot started.');
+  } catch (err) {
+    addLog('error', `Start failed: ${err.message}`);
+  }
+}
+async function stopBot () {
+  if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
+  try {
+    await api(`/api/pine/scripts/${selectedPineScriptId}/stop`, { method:'POST' });
+    await loadSelectedRuntime();
+    addLog('success', 'Pine bot stopped.');
+  } catch (err) {
+    addLog('error', `Stop failed: ${err.message}`);
+  }
+}
+async function pauseBot () {
+  if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
+  try {
+    await api(`/api/pine/scripts/${selectedPineScriptId}/pause`, { method:'POST' });
+    await loadSelectedRuntime();
+    addLog('warn', 'Pine bot paused.');
+  } catch (err) {
+    addLog('error', `Pause failed: ${err.message}`);
+  }
+}
+async function resumeBot () {
+  if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
+  try {
+    await api(`/api/pine/scripts/${selectedPineScriptId}/resume`, { method:'POST' });
+    await loadSelectedRuntime();
+    addLog('success', 'Pine bot resumed.');
+  } catch (err) {
+    addLog('error', `Resume failed: ${err.message}`);
+  }
+}
+async function resetBot () {
+  if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
+  if (!confirm('Reset Pine bot session?')) return;
+  try {
+    await api(`/api/pine/scripts/${selectedPineScriptId}/reset`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({ capital:Number($('capital').value) || 10000, risk:Number($('risk').value) || 2 }),
+    });
+    await loadSelectedRuntime();
+    addLog('warn', 'Pine bot reset.');
+  } catch (err) {
+    addLog('error', `Reset failed: ${err.message}`);
+  }
+}
+async function newBot () {
+  if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
+  try {
+    await api(`/api/pine/scripts/${selectedPineScriptId}/new`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({ capital:Number($('capital').value) || 10000, risk:Number($('risk').value) || 2 }),
+    });
+    await loadSelectedRuntime();
+    addLog('success', 'New Pine 24hr bot session started.');
+  } catch (err) {
+    addLog('error', `New bot failed: ${err.message}`);
+  }
+}
+
+function applySessionInfo (info) {
+  if (!info) {
+    $('session-badge').textContent = 'No session';
+    $('session-info').textContent = '--';
+    return;
+  }
+  const state = !info.isRunning ? 'STOPPED' : info.paused ? 'PAUSED' : 'RUNNING';
+  $('session-badge').textContent = state;
+  $('session-info').textContent = `${info.shortId || '--'} / ${fmtUSD(info.currentCapital)} / risk ${info.riskPerTradePct || 2}%`;
+}
+function renderPosition (pos) {
+  if (!pos) {
+    $('position-state').textContent = 'Flat';
+    $('position-box').className = 'position-box muted';
+    $('position-box').textContent = 'No active position.';
+    return;
+  }
+  $('position-state').innerHTML = `<span class="${pos.type === 'long' ? 'pos' : 'neg'}">${pos.type.toUpperCase()}</span>`;
+  let unreal = 0;
+  if (currentPrice) {
+    unreal = pos.type === 'long' ? (currentPrice - pos.entry) * pos.qty : (pos.entry - currentPrice) * pos.qty;
+  }
+  $('position-box').className = 'position-box';
+  $('position-box').innerHTML = `
+    <span class="badge ${pos.type === 'long' ? 'long' : 'short'}">${pos.type.toUpperCase()}</span>
+    <div class="position-grid">
+      <div><div class="label">Entry</div><div class="small-value">${fmtUSD(pos.entry)}</div></div>
+      <div><div class="label">Qty</div><div class="small-value">${Number(pos.qty || 0).toFixed(5)}</div></div>
+      <div><div class="label">Trail SL</div><div class="small-value neg">${fmtUSD(pos.trailSl)}</div></div>
+      <div><div class="label">TP</div><div class="small-value pos">${fmtUSD(pos.tp)}</div></div>
+      <div><div class="label">Unrealized</div><div class="small-value ${unreal >= 0 ? 'pos' : 'neg'}">${unreal >= 0 ? '+' : ''}${fmtUSD(unreal)}</div></div>
+    </div>`;
+}
+function renderTrades (trades = []) {
+  $('trade-count').textContent = `${trades.length} trade${trades.length === 1 ? '' : 's'}`;
+  $('trade-body').innerHTML = trades.length
+    ? trades.slice(0, 120).map(t => {
+      const pnlClass = t.pnl >= 0 ? 'pos' : 'neg';
+      const reasonClass = t.reason === 'take_profit' ? 'tp' : t.reason === 'stop_loss' ? 'sl' : 'saved';
+      return `<tr>
+        <td>${esc(t.id)}</td>
+        <td><span class="badge ${t.type === 'long' ? 'long' : 'short'}">${esc(String(t.type || '').toUpperCase())}</span></td>
+        <td>${fmtUSD(t.entry)}</td>
+        <td>${fmtUSD(t.exit)}</td>
+        <td class="${pnlClass}">${t.pnl >= 0 ? '+' : ''}${fmtUSD(t.pnl)}</td>
+        <td class="${pnlClass}">${Number(t.pnlPct || 0).toFixed(2)}%</td>
+        <td><span class="badge ${reasonClass}">${esc(String(t.reason || '').replace('_',' ').toUpperCase())}</span></td>
+        <td class="muted">${fmtDT(t.exitTime)}</td>
+      </tr>`;
+    }).join('')
+    : '<tr><td colspan="8" class="muted">No closed trades.</td></tr>';
+}
+function applyStats (s = {}, updateMarkers = true) {
+  latestStats = s;
+  $('m-pnl').innerHTML = `<span class="${s.totalPnl >= 0 ? 'pos' : 'neg'}">${s.totalPnl >= 0 ? '+' : ''}${fmtUSD(s.totalPnl)}</span>`;
+  $('m-ret').innerHTML = `<span class="${s.totalReturn >= 0 ? 'pos' : 'neg'}">${fmtPct(s.totalReturn)}</span>`;
+  $('m-day').innerHTML = `<span class="${s.dayPnl >= 0 ? 'pos' : 'neg'}">${s.dayPnl >= 0 ? '+' : ''}${fmtUSD(s.dayPnl)}</span>`;
+  $('m-trades').textContent = s.totalTrades ?? 0;
+  $('m-wr').textContent = s.totalTrades ? Number(s.winRate || 0).toFixed(1) + '%' : '--';
+  $('m-pf').textContent = s.profitFactor === Infinity ? 'Inf' : s.profitFactor > 0 ? Number(s.profitFactor).toFixed(2) : '--';
+  if (s.position !== undefined) renderPosition(s.position);
+  if (s.recentTrades) {
+    renderTrades(s.recentTrades);
+    if (updateMarkers) setTradeMarkers(s.recentTrades);
+  }
+  if (s.scriptMeta) updatePineConfig({ name:s.scriptMeta.name, meta:s.scriptMeta });
+  updateChartState();
+}
+
+async function loadSelectedRuntime () {
+  if (!selectedPineScriptId) {
+    updateStatus({ running:false, paused:false, warmedUp:false });
+    applySessionInfo(null);
+    applyStats({ totalPnl:0, totalReturn:0, dayPnl:0, totalTrades:0, position:null, recentTrades:[] });
+    return;
+  }
+  try {
+    const status = await api(`/api/pine/scripts/${selectedPineScriptId}/status`);
+    updateStatus(status);
+    applySessionInfo(status.session);
+  } catch (err) {}
+  try {
+    const stats = await api(`/api/pine/scripts/${selectedPineScriptId}/stats`);
+    applyStats(stats);
+  } catch (err) {}
+  try {
+    const trades = await api(`/api/pine/scripts/${selectedPineScriptId}/trades`);
+    renderTrades(trades);
+    setTradeMarkers(trades);
+  } catch (err) {}
+  await loadScripts().catch(() => {});
+}
+
+async function runBacktest () {
+  const fromDate = $('backtest-from').value;
+  const toDate = $('backtest-to').value;
+  if (!fromDate || !toDate) return addLog('error', 'Choose a backtest date range.');
+  const code = $('pine-code').value.trim();
+  const name = $('script-name').value.trim() || 'Backtest Pine';
+  const capital = Number($('capital').value) || 10000;
+  const risk = Number($('risk').value) || 2;
+  if (!selectedPineScriptId && !code) return addLog('error', 'Select a saved script or paste Pine code first.');
+  $('backtest-report').textContent = 'Running backtest...';
+  try {
+    const payload = selectedPineScriptId
+      ? { scriptId:selectedPineScriptId, fromDate, toDate, capital, risk }
+      : { code, name, fromDate, toDate, capital, risk };
+    const data = await api('/api/pine/backtest', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify(payload),
+    });
+    const s = data.summary || {};
+    const pnlClass = s.netPnl >= 0 ? 'pos' : 'neg';
+    $('backtest-report').innerHTML = `
+      <div><b>${esc(data.script?.name || name)}</b></div>
+      <div class="muted">${esc(String(data.from || '').slice(0,10))} to ${esc(String(data.to || '').slice(0,10))} / ${data.candles || 0} candles / ${data.warmupCandles || 0} warmup</div>
+      <div class="grid3" style="margin-top:10px">
+        <div class="metric"><div class="metric-label">Net P&L</div><div class="metric-value ${pnlClass}">${s.netPnl >= 0 ? '+' : ''}${fmtUSD(s.netPnl)}</div></div>
+        <div class="metric"><div class="metric-label">Return</div><div class="metric-value ${pnlClass}">${fmtPct(s.returnPct)}</div></div>
+        <div class="metric"><div class="metric-label">Trades</div><div class="metric-value">${s.totalTrades || 0}</div></div>
+        <div class="metric"><div class="metric-label">Win Rate</div><div class="metric-value">${s.totalTrades ? Number(s.winRate || 0).toFixed(1) + '%' : '--'}</div></div>
+        <div class="metric"><div class="metric-label">Profit Factor</div><div class="metric-value">${s.profitFactor === Infinity ? 'Inf' : s.profitFactor ? Number(s.profitFactor).toFixed(2) : '--'}</div></div>
+        <div class="metric"><div class="metric-label">Max DD</div><div class="metric-value neg">${Number(s.maxDrawdownPct || 0).toFixed(2)}%</div></div>
+      </div>
+      <div class="muted" style="margin-top:9px">Recent trades: ${(data.trades || []).slice(0,5).map(t => `${String(t.type || '').toUpperCase()} ${t.pnl >= 0 ? '+' : ''}${fmtUSD(t.pnl)}`).join(' / ') || 'none'}</div>`;
+    addLog('success', 'Backtest completed.');
+  } catch (err) {
+    $('backtest-report').innerHTML = `<span class="neg">${esc(err.message)}</span>`;
+    addLog('error', `Backtest failed: ${err.message}`);
+  }
+}
+
+async function loadInitial () {
+  try {
+    const cfg = await api('/api/pine/config');
+    updatePineConfig(cfg);
+  } catch (err) {}
+  try {
+    const candles = await api('/api/candles');
+    if (Array.isArray(candles) && candles.length) renderCandles(candles);
+  } catch (err) {}
+  try { await loadScripts(); } catch (err) { addLog('error', `Could not load scripts: ${err.message}`); }
+  await loadSelectedRuntime();
+}
+
+socket.on('ticker', t => {
+  currentPrice = Number(t.price);
+  $('price').textContent = fmtUSD(t.price);
+});
+socket.on('candles', renderCandles);
+socket.on('candle_tick', onCandleTick);
+socket.on('ws_status', s => {
+  $('ws-kline').textContent = s.kline ? 'ON' : 'OFF';
+  $('ws-kline').className = s.kline ? 'pos' : 'neg';
+  $('ws-ticker').textContent = s.ticker ? 'ON' : 'OFF';
+  $('ws-ticker').className = s.ticker ? 'pos' : 'neg';
+});
+socket.on('all_status', status => updateHeaderStatus(status.pine || {}));
+socket.on('pine:status', updateHeaderStatus);
+socket.on('pine:runner_event', payload => {
+  if (!payload?.scriptId) return;
+  const item = pineScripts.find(s => s.id === payload.scriptId);
+  if (item) {
+    item.status = payload.status || item.status;
+    item.stats = payload.stats || item.stats;
+  }
+  renderScripts();
+  if (payload.scriptId !== selectedPineScriptId) return;
+  if (payload.status) updateStatus(payload.status);
+  if (payload.event === 'session_info') applySessionInfo(payload.data);
+  if (payload.stats) applyStats(payload.stats);
+  if (payload.event === 'position_opened') {
+    latestStats = { ...latestStats, position:payload.data };
+    renderPosition(payload.data);
+    renderChartPosition(payload.data);
+    addChartMarker(payload.data.entryTime || Date.now(), payload.data.type, null);
+    updateChartState();
+  }
+  if (payload.event === 'trade_closed') {
+    addChartMarker(payload.data.exitTime || Date.now(), payload.data.type, payload.data.pnl);
+    loadSelectedRuntime().catch(() => {});
+  }
+});
+socket.on('pine:config', updatePineConfig);
+socket.on('pine:scripts', renderScripts);
+socket.on('pine:runners', renderScripts);
+socket.on('log', l => {
+  const strategyId = l.strategyId || l.strategy;
+  if (!strategyId || strategyId === 'pine' || String(strategyId).startsWith('pine:')) addLog(l.level || 'info', l.msg || '');
+});
+socket.on('connect', () => addLog('success', 'Connected to server.'));
+socket.on('disconnect', () => addLog('error', 'Disconnected from server.'));
+
+window.addEventListener('load', () => {
+  initPriceChart();
+  $('pine-file').addEventListener('change', async e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    $('script-name').value = file.name.replace(/\.(pine|txt|pinescript)$/i, '') || 'Uploaded Pine Strategy';
+    $('pine-code').value = await file.text();
+    $('editor-mode').textContent = `Loaded file ${file.name}`;
+  });
+  $('pine-editor-modal').addEventListener('click', e => {
+    if (e.target.id === 'pine-editor-modal') closeEditor();
+  });
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeEditor();
+  });
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  $('backtest-to').value = now.toISOString().slice(0, 10);
+  $('backtest-from').value = weekAgo.toISOString().slice(0, 10);
+  updateHeaderStatus();
+  updateStatus();
+  loadInitial();
+  addLog('info', 'Pine Upload Bot page ready.');
+});
+</script>
+</body>
+</html>

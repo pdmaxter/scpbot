@@ -13,7 +13,8 @@ async function connect () {
 // ─────────────────────────────────────────────────────────────────────────────
 const sessionSchema = new mongoose.Schema({
   isRunning:          { type: Boolean,  default: false   },
-  strategyType:       { type: String,   enum: ['scalping', 'breakout'], default: 'scalping' },
+  strategyType:       { type: String,   default: 'scalping' },
+  pineScriptId:       { type: mongoose.Schema.Types.ObjectId, ref: 'PineScriptConfig', index: true },
   initialCapital:     { type: Number,   required: true   },
   currentCapital:     { type: Number,   required: true   },
   dailyStartCapital:  { type: Number                     },
@@ -89,6 +90,17 @@ const positionSchema = new mongoose.Schema({
   entryTime:  Number,
 }, { timestamps: true });
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  PineScriptConfig — latest uploaded Pine adapter script
+// ─────────────────────────────────────────────────────────────────────────────
+const pineScriptSchema = new mongoose.Schema({
+  key:      { type: String, default: () => new mongoose.Types.ObjectId().toString(), unique: true },
+  name:     { type: String, default: 'Uploaded Pine' },
+  code:     { type: String, default: '' },
+  meta:     { type: Object, default: {} },
+  isActive: { type: Boolean, default: false, index: true },
+}, { timestamps: true });
+
 module.exports = {
   connect,
   Session:   mongoose.model('BotSession',   sessionSchema),
@@ -96,4 +108,5 @@ module.exports = {
   DailyPnl:  mongoose.model('BotDailyPnl',  dailyPnlSchema),
   Equity:    mongoose.model('BotEquity',    equitySchema),
   Position:  mongoose.model('BotPosition',  positionSchema),
+  PineScriptConfig: mongoose.model('PineScriptConfig', pineScriptSchema),
 };

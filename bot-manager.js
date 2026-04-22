@@ -20,10 +20,13 @@ const today   = ()  => new Date().toISOString().slice(0, 10);
 //  StrategyRunner — wraps one strategy instance with independent lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
 class StrategyRunner {
-  constructor (id, strategy, io) {
-    this.id       = id;    // 'scalping' | 'breakout'
+  constructor (id, strategy, io, opts = {}) {
+    this.id       = id;    // 'scalping' | 'breakout' | 'heikenashi' | 'pine:<scriptId>'
     this.strategy = strategy;
     this.io       = io;
+    this.sessionStrategyType = opts.sessionStrategyType || id;
+    this.pineScriptId        = opts.pineScriptId || null;
+    this.displayName         = opts.displayName || id;
     this.sessionId        = null;
     this.running          = false;
     this.paused           = false;
@@ -35,7 +38,10 @@ class StrategyRunner {
 
   log (level, msg) {
     console.log(`[${this.id.toUpperCase()}][${level.toUpperCase()}] ${msg}`);
-    this.io.emit('log', { level, msg: `[${this.id === 'scalping' ? '📈 EMA' : '🚀 BRK'}] ${msg}`, time: Date.now(), strategyId: this.id });
+    const tag = this.id === 'scalping' ? '📈 EMA'
+      : this.id === 'breakout' ? '🚀 BRK'
+        : this.id === 'heikenashi' ? '🕯️ HA' : `📜 ${this.displayName || 'PINE'}`;
+    this.io.emit('log', { level, msg: `[${tag}] ${msg}`, time: Date.now(), strategyId: this.id });
   }
 
   // ── Wire strategy events → DB persistence + socket broadcast ──────────────
@@ -125,7 +131,8 @@ class StrategyRunner {
         await Session.findByIdAndUpdate(this.sessionId, { isRunning: false, stoppedAt: new Date() }).catch(() => {});
       const sess = await Session.create({
         isRunning:         true,
-        strategyType:      this.id,
+        strategyType:      this.sessionStrategyType,
+        ...(this.pineScriptId && { pineScriptId: this.pineScriptId }),
         initialCapital:    s.initialCapital,
         currentCapital:    s.capital,
         riskPerTradePct:   s.riskPerTrade * 100,
@@ -214,7 +221,9 @@ class StrategyRunner {
 
   // ── Restore from MongoDB + Binance history ─────────────────────────────────
   async restoreFromDB () {
-    const sess = await Session.findOne({ strategyType: this.id }).sort({ createdAt: -1 }).lean();
+    const query = { strategyType: this.sessionStrategyType };
+    if (this.pineScriptId) query.pineScriptId = this.pineScriptId;
+    const sess = await Session.findOne(query).sort({ createdAt: -1 }).lean();
     if (!sess) return null;
 
     this.sessionId = sess._id;
@@ -265,7 +274,9 @@ class StrategyRunner {
     return {
       id:             sess._id.toString(),
       shortId:        sess._id.toString().slice(-6).toUpperCase(),
-      strategyType:   this.id,
+      strategyType:   this.sessionStrategyType,
+      runnerId:       this.id,
+      pineScriptId:   this.pineScriptId,
       isRunning:      sess.isRunning,
       paused:         this.paused,
       initialCapital: sess.initialCapital,
@@ -305,7 +316,7 @@ class StrategyRunner {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  BotManager — shared Binance WS + fan-out to both runners
+//  BotManager — shared Binance WS + fan-out to all runners
 // ─────────────────────────────────────────────────────────────────────────────
 class BotManager {
   constructor (io) {
@@ -324,6 +335,8 @@ class BotManager {
   }
 
   getRunner (id) { return this.runners[id]; }
+
+  removeRunner (id) { delete this.runners[id]; }
 
   // ── Fetch historical candles ───────────────────────────────────────────────
   fetchHistory () {
@@ -433,9 +446,22 @@ class BotManager {
 
   // ── Full status snapshot (both runners) ────────────────────────────────────
   allStatus () {
-    return Object.fromEntries(
+    const status = Object.fromEntries(
       Object.values(this.runners).map(r => [r.id, r._status()])
     );
+    const pineRunners = Object.values(this.runners).filter(r => r.id.startsWith('pine:'));
+    if (pineRunners.length) {
+      const running = pineRunners.some(r => r.running);
+      status.pine = {
+        id: 'pine',
+        running,
+        paused: running && pineRunners.filter(r => r.running).every(r => r.paused),
+        warmedUp: running && pineRunners.filter(r => r.running).every(r => r.strategy.warmedUp),
+        count: pineRunners.length,
+        runningCount: pineRunners.filter(r => r.running).length,
+      };
+    }
+    return status;
   }
 
   // ── Send full state to a newly connected socket ────────────────────────────
@@ -456,7 +482,7 @@ class BotManager {
       if (equity.length) socket.emit(`${runner.id}:equity_history`, equity);
     }
 
-    // Sessions list (both strategies combined)
+    // Sessions list (all strategies combined)
     await this.sendSessionsList(socket);
   }
 
@@ -466,6 +492,7 @@ class BotManager {
       id:             s._id.toString(),
       shortId:        s._id.toString().slice(-6).toUpperCase(),
       strategyType:   s.strategyType || 'scalping',
+      pineScriptId:   s.pineScriptId?.toString?.() || s.pineScriptId || null,
       isRunning:      s.isRunning,
       initialCapital: s.initialCapital,
       currentCapital: s.currentCapital,
