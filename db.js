@@ -116,6 +116,8 @@ const allInOneStrategySchema = new mongoose.Schema({
   name:     { type: String, required: true },
   timeframe:{ type: String, default: '5m' },
   capital:  { type: Number, default: 1000 },
+  buyFeePct: { type: Number, default: 0 },
+  sellFeePct: { type: Number, default: 0 },
   riskPerTradePct: { type: Number, default: 1 },
   atrLength: { type: Number, default: 14 },
   slMultiplier: { type: Number, default: 2 },

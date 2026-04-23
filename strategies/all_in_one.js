@@ -39,6 +39,8 @@ class AllInOneStrategy extends EventEmitter {
     this.timeframe = normalizeTimeframe(cfg.timeframe);
     this.initialCapital = Number(cfg.capital || 1000);
     this.capital = this.initialCapital;
+    this.buyFeePct = Math.max(0, Number(cfg.buyFeePct || 0)) / 100;
+    this.sellFeePct = Math.max(0, Number(cfg.sellFeePct || 0)) / 100;
     this.riskPerTrade = AUTO_RISK.riskPerTradePct / 100;
     this.atrLength = AUTO_RISK.atrLength;
     this.slMultiplier = AUTO_RISK.slMultiplier;
@@ -58,6 +60,8 @@ class AllInOneStrategy extends EventEmitter {
       this.capital = Number(cfg.capital) || this.initialCapital;
       this.initialCapital = this.capital;
     }
+    if (cfg.buyFeePct !== undefined) this.buyFeePct = Math.max(0, Number(cfg.buyFeePct) || 0) / 100;
+    if (cfg.sellFeePct !== undefined) this.sellFeePct = Math.max(0, Number(cfg.sellFeePct) || 0) / 100;
     this.riskPerTrade = AUTO_RISK.riskPerTradePct / 100;
     this.atrLength = AUTO_RISK.atrLength;
     this.slMultiplier = AUTO_RISK.slMultiplier;
@@ -311,14 +315,19 @@ class AllInOneStrategy extends EventEmitter {
     const qty = Math.max(1, Math.round((this.capital * this.riskPerTrade) / slDistance));
     const sl = type === 'long' ? entry - slDistance : entry + slDistance;
     const tp = type === 'long' ? entry + atrValue * this.tpMultiplier : entry - atrValue * this.tpMultiplier;
-    this.position = { type, entry, sl, tp, trailSl: sl, qty, entryTime: time, timeframe: this.timeframe, strategyKey: this.strategyKey };
+    const entryFeePct = type === 'long' ? this.buyFeePct : this.sellFeePct;
+    const entryFee = entry * qty * entryFeePct;
+    this.position = { type, entry, sl, tp, trailSl: sl, qty, entryFee, entryTime: time, timeframe: this.timeframe, strategyKey: this.strategyKey };
     this.emit('position_opened', { ...this.position });
   }
 
   _closePos (exitPrice, exitTime, reason) {
     if (!this.position) return;
-    const { type, entry, qty, entryTime, sl, tp } = this.position;
-    const pnl = type === 'long' ? (exitPrice - entry) * qty : (entry - exitPrice) * qty;
+    const { type, entry, qty, entryTime, sl, tp, entryFee } = this.position;
+    const exitFeePct = type === 'long' ? this.sellFeePct : this.buyFeePct;
+    const exitFee = exitPrice * qty * exitFeePct;
+    const gross = type === 'long' ? (exitPrice - entry) * qty : (entry - exitPrice) * qty;
+    const pnl = gross - (entryFee || 0) - exitFee;
     const capitalBefore = this.capital;
     this.capital += pnl;
     if (this.equityHistory.length) this.equityHistory[this.equityHistory.length - 1].equity = this.capital;
@@ -335,6 +344,7 @@ class AllInOneStrategy extends EventEmitter {
       reason,
       sl,
       tp,
+      fees: (entryFee || 0) + exitFee,
       timeframe: this.timeframe,
       strategyKey: this.strategyKey,
     };
@@ -356,6 +366,10 @@ class AllInOneStrategy extends EventEmitter {
       timeframe: this.timeframe,
       capital: this.capital,
       initialCapital: this.initialCapital,
+      settings: {
+        buyFeePct: this.buyFeePct * 100,
+        sellFeePct: this.sellFeePct * 100,
+      },
       riskPerTradePct: this.riskPerTrade * 100,
       totalPnl,
       totalReturn: this.initialCapital ? totalPnl / this.initialCapital * 100 : 0,

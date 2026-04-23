@@ -469,6 +469,8 @@ function allInOneDefaultConfig (def) {
     name: def.name,
     timeframe: '5m',
     capital: 1000,
+    buyFeePct: 0,
+    sellFeePct: 0,
     ...ALL_IN_ONE_AUTO_RISK,
     isActive: false,
   };
@@ -492,6 +494,8 @@ function allInOneListItem (doc) {
     name: doc.name,
     timeframe: doc.timeframe || '5m',
     capital: doc.capital || 1000,
+    buyFeePct: doc.buyFeePct || 0,
+    sellFeePct: doc.sellFeePct || 0,
     riskPerTradePct: doc.riskPerTradePct || 1,
     atrLength: doc.atrLength || 14,
     slMultiplier: doc.slMultiplier || 2,
@@ -507,6 +511,8 @@ function allInOneStrategyOptions (doc) {
     strategyKey: doc.key,
     timeframe: TIMEFRAME_MS[doc.timeframe] ? doc.timeframe : '5m',
     capital: doc.capital || 1000,
+    buyFeePct: doc.buyFeePct || 0,
+    sellFeePct: doc.sellFeePct || 0,
     ...ALL_IN_ONE_AUTO_RISK,
   };
 }
@@ -514,6 +520,8 @@ function allInOneStrategyOptions (doc) {
 function applyAllInOneRuntimeOptions (doc, body = {}) {
   if (body.timeframe !== undefined && TIMEFRAME_MS[String(body.timeframe)]) doc.timeframe = String(body.timeframe);
   if (body.capital !== undefined) doc.capital = Math.max(100, Number(body.capital) || doc.capital || 1000);
+  if (body.buyFeePct !== undefined) doc.buyFeePct = Math.max(0, Number(body.buyFeePct) || 0);
+  if (body.sellFeePct !== undefined) doc.sellFeePct = Math.max(0, Number(body.sellFeePct) || 0);
   Object.assign(doc, ALL_IN_ONE_AUTO_RISK);
 }
 
@@ -556,6 +564,8 @@ function commonAllInOneSettings (doc) {
   return {
     timeframe: doc?.timeframe || '5m',
     capital: doc?.capital || 1000,
+    buyFeePct: doc?.buyFeePct || 0,
+    sellFeePct: doc?.sellFeePct || 0,
     autoRisk: ALL_IN_ONE_AUTO_RISK,
   };
 }
@@ -565,15 +575,21 @@ async function saveCommonAllInOneSettings (body = {}) {
   const patch = {
     timeframe: TIMEFRAME_MS[String(body.timeframe)] ? String(body.timeframe) : '5m',
     capital: Math.max(100, Number(body.capital) || 1000),
+    buyFeePct: Math.max(0, Number(body.buyFeePct) || 0),
+    sellFeePct: Math.max(0, Number(body.sellFeePct) || 0),
     ...ALL_IN_ONE_AUTO_RISK,
   };
   await AllInOneStrategyConfig.updateMany({}, { $set: patch });
   for (const runner of allInOneRunners.values()) {
+    runner.strategy.buyFeePct = patch.buyFeePct / 100;
+    runner.strategy.sellFeePct = patch.sellFeePct / 100;
     if (!runner.running) {
       runner.strategy.reset({
         strategyKey: runner.strategy.strategyKey,
         timeframe: patch.timeframe,
         capital: patch.capital,
+        buyFeePct: patch.buyFeePct,
+        sellFeePct: patch.sellFeePct,
         ...ALL_IN_ONE_AUTO_RISK,
       });
     }
