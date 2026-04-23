@@ -111,6 +111,24 @@ const pineScriptSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  AllInOneStrategyConfig — persisted settings for each 10-in-1 strategy
+// ─────────────────────────────────────────────────────────────────────────────
+const allInOneStrategySchema = new mongoose.Schema({
+  key:      { type: String, required: true, unique: true, index: true },
+  name:     { type: String, required: true },
+  timeframe:{ type: String, default: '5m' },
+  capital:  { type: Number, default: 1000 },
+  riskPerTradePct: { type: Number, default: 1 },
+  atrLength: { type: Number, default: 14 },
+  slMultiplier: { type: Number, default: 2 },
+  tpMultiplier: { type: Number, default: 4 },
+  trailOffset: { type: Number, default: 1.5 },
+  exchangeEnabled: { type: Boolean, default: false },
+  exchangeProvider: { type: String, default: 'delta-demo' },
+  isActive: { type: Boolean, default: false, index: true },
+}, { timestamps: true });
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  ExchangeOrder — audit log for broker/demo exchange orders mirrored from bots
 // ─────────────────────────────────────────────────────────────────────────────
 const exchangeOrderSchema = new mongoose.Schema({
@@ -160,6 +178,7 @@ module.exports = {
   Equity:    mongoose.model('BotEquity',    equitySchema),
   Position:  mongoose.model('BotPosition',  positionSchema),
   PineScriptConfig: mongoose.model('PineScriptConfig', pineScriptSchema),
+  AllInOneStrategyConfig: mongoose.model('AllInOneStrategyConfig', allInOneStrategySchema),
   ExchangeOrder: mongoose.model('ExchangeOrder', exchangeOrderSchema),
   ExchangeCredential: mongoose.model('ExchangeCredential', exchangeCredentialSchema),
 };

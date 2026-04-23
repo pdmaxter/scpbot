@@ -1,0 +1,129 @@
+//@version=5
+strategy("Pro Crypto Master: 10-in-1 Strategy", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.06)
+
+// =========================================================================
+// 1. INPUTS & SETTINGS
+// =========================================================================
+stratChoice = input.string("1. EMA Crossover", title="Select Strategy", options=["1. EMA Crossover", "2. RSI Mean Reversion", "3. MACD Momentum", "4. Bollinger Breakout", "5. Supertrend Flip", "6. VWAP Pullback", "7. Stochastic RSI", "8. Donchian Breakout", "9. Hybrid: RSI + EMA", "10. Inside Bar Breakout"])
+
+// Risk Management Inputs
+riskPerTrade = input.float(1.0, title="Risk Per Trade (%)", minval=0.1, maxval=5.0) / 100
+atrLength    = input.int(14, title="ATR Length")
+slMultiplier = input.float(2.0, title="Stop Loss ATR Multiplier")
+tpMultiplier = input.float(4.0, title="Take Profit ATR Multiplier")
+trailOffset  = input.float(1.5, title="Trailing Stop ATR Multiplier")
+
+// =========================================================================
+// 2. INDICATORS & LOGIC CALCULATIONS
+// =========================================================================
+atr = ta.atr(atrLength)
+
+// Strat 1: EMA
+ema50 = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+
+// Strat 2 & 9: RSI
+rsi = ta.rsi(close, 14)
+
+// Strat 3: MACD
+[macdLine, signalLine, _] = ta.macd(close, 12, 26, 9)
+
+// Strat 4: Bollinger Bands
+[middleBB, upperBB, lowerBB] = ta.bb(close, 20, 2.0)
+
+// Strat 5: Supertrend
+[supertrend, direction] = ta.supertrend(3, 10)
+
+// Strat 6: VWAP
+vwapVal = ta.vwap(close)
+
+// Strat 7: Stoch RSI
+k = ta.sma(ta.stoch(rsi, rsi, rsi, 14), 3)
+d = ta.sma(k, 3)
+
+// Strat 8: Donchian
+upperDonchian = ta.highest(high, 20)
+lowerDonchian = ta.lowest(low, 20)
+
+// Strat 10: Inside Bar
+insideBar = (high < high[1]) and (low > low[1])
+
+// =========================================================================
+// 3. STRATEGY CONDITIONS (SWITCH STATEMENT)
+// =========================================================================
+var bool longCond = false
+var bool shortCond = false
+
+switch stratChoice
+    "1. EMA Crossover" =>
+        longCond := ta.crossover(ema50, ema200)
+        shortCond := ta.crossunder(ema50, ema200)
+    "2. RSI Mean Reversion" =>
+        longCond := ta.crossover(rsi, 30)
+        shortCond := ta.crossunder(rsi, 70)
+    "3. MACD Momentum" =>
+        longCond := ta.crossover(macdLine, signalLine)
+        shortCond := ta.crossunder(macdLine, signalLine)
+    "4. Bollinger Breakout" =>
+        longCond := close > upperBB
+        shortCond := close < lowerBB
+    "5. Supertrend Flip" =>
+        longCond := ta.change(direction) < 0
+        shortCond := ta.change(direction) > 0
+    "6. VWAP Pullback" =>
+        longCond := ta.crossover(close, vwapVal) and close > ema200
+        shortCond := ta.crossunder(close, vwapVal) and close < ema200
+    "7. Stochastic RSI" =>
+        longCond := ta.crossover(k, d) and k < 20
+        shortCond := ta.crossunder(k, d) and k > 80
+    "8. Donchian Breakout" =>
+        longCond := close == upperDonchian
+        shortCond := close == lowerDonchian
+    "9. Hybrid: RSI + EMA" =>
+        longCond := ta.crossover(rsi, 30) and close > ema200
+        shortCond := ta.crossunder(rsi, 70) and close < ema200
+    "10. Inside Bar Breakout" =>
+        longCond := insideBar[1] and close > high[1]
+        shortCond := insideBar[1] and close < low[1]
+
+// =========================================================================
+// 4. POSITION SIZING & RISK MANAGEMENT
+// =========================================================================
+// Calculate risk amount in quote currency (e.g., USD)
+riskAmount = strategy.equity * riskPerTrade
+// Stop loss distance in price points
+slDistance = atr * slMultiplier
+// Position size based on risking exactly 1% on the SL distance
+qty = riskAmount / slDistance
+
+// =========================================================================
+// 5. EXECUTION & AUTO EXITS (TP / SL / TRAILING)
+// =========================================================================
+if (longCond and strategy.position_size == 0)
+    strategy.entry("Long", strategy.long, qty=qty)
+    
+if (shortCond and strategy.position_size == 0)
+    strategy.entry("Short", strategy.short, qty=qty)
+
+// Determine Exit Prices dynamically for the current position
+var float longSL = na
+var float longTP = na
+var float shortSL = na
+var float shortTP = na
+
+if strategy.position_size > 0 and strategy.position_size[1] == 0
+    longSL := close - (atr * slMultiplier)
+    longTP := close + (atr * tpMultiplier)
+
+if strategy.position_size < 0 and strategy.position_size[1] == 0
+    shortSL := close + (atr * slMultiplier)
+    shortTP := close - (atr * tpMultiplier)
+
+// Trailing Stop Logic using Strategy.Exit built-in trailing params
+trailPoints = atr * trailOffset / syminfo.mintick
+
+if (strategy.position_size > 0)
+    strategy.exit("Exit Long", "Long", stop=longSL, limit=longTP, trail_points=trailPoints, trail_offset=trailPoints)
+
+if (strategy.position_size < 0)
+    strategy.exit("Exit Short", "Short", stop=shortSL, limit=shortTP, trail_points=trailPoints, trail_offset=trailPoints)

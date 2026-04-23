@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>All-in-One Strategy Bot</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+:root{--bg:#0b0d14;--panel:#12141f;--panel2:#181a28;--line:#252840;--text:#c9cde0;--muted:#6a708f;--green:#00e676;--red:#ff3d57;--blue:#2979ff;--yellow:#ffd740;--pink:#f48fb1;--orange:#ff9100;--font:'Segoe UI',system-ui,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
+.page{min-height:100vh;display:grid;grid-template-rows:56px 1fr}
+.header{display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.brand{font-size:15px;font-weight:900;letter-spacing:.02em;white-space:nowrap}.brand span{color:var(--blue)}
+.price{font-size:18px;font-weight:900;font-variant-numeric:tabular-nums}.spacer{flex:1}
+.status-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.04em;color:var(--muted)}
+.pill.mode{background:#2979ff18;border-color:#2979ff44;color:var(--blue)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;background:var(--red)}.dot.live{background:var(--green);box-shadow:0 0 6px var(--green)}.dot.warm{background:var(--yellow);box-shadow:0 0 6px var(--yellow)}
+.link-btn,.ghost-btn,.solid-btn,.danger-btn{border-radius:4px;border:1px solid var(--line);padding:6px 10px;font-size:11px;font-weight:800;letter-spacing:.02em;text-decoration:none;cursor:pointer;white-space:nowrap}
+.link-btn{background:#2979ff18;color:var(--blue);border-color:#2979ff40}.ghost-btn{background:#25284080;color:var(--text)}.solid-btn{background:#00e676;color:#06120a;border-color:#00e676}.danger-btn{background:#ff3d57;color:#fff;border-color:#ff3d57}
+button:disabled{opacity:.35;cursor:not-allowed}
+.main{display:grid;grid-template-columns:minmax(340px,440px) minmax(0,1fr);gap:12px;padding:12px;max-width:1540px;width:100%;margin:0 auto}
+.stack{display:flex;flex-direction:column;gap:12px;min-width:0}.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.panel-title{font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.panel-body{padding:12px}
+.muted{color:var(--muted)}.pos{color:var(--green)}.neg{color:var(--red)}.warn{color:var(--yellow)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}.label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:.04em;text-transform:uppercase}
+.inp{width:100%;background:#0d101a;border:1px solid var(--line);border-radius:4px;color:var(--text);font:inherit;padding:8px;outline:none}.inp:focus{border-color:var(--blue)}
+.check-row{display:flex;align-items:center;gap:8px;background:#0d101a;border:1px solid var(--line);border-radius:4px;padding:8px;color:var(--text);font-weight:800}.check-row input{width:16px;height:16px;accent-color:var(--green)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.script-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--panel2);max-height:430px;overflow-y:auto}
+.script-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 10px;border-bottom:1px solid var(--line);cursor:pointer}.script-row:last-child{border-bottom:0}.script-row:hover,.script-row.active{background:#202335}
+.row-actions{display:flex;align-items:center;gap:6px;justify-content:flex-end}
+.toggle-btn{min-width:54px;border-radius:4px;border:1px solid var(--line);padding:5px 8px;font-size:10px;font-weight:900;letter-spacing:.03em;cursor:pointer}
+.toggle-btn.start{background:#00e67618;color:var(--green);border-color:#00e67644}
+.toggle-btn.stop{background:#ff3d5718;color:var(--red);border-color:#ff3d5744}
+.script-name{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.script-meta{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{display:inline-flex;align-items:center;border-radius:3px;padding:2px 6px;font-size:10px;font-weight:900}.badge.active{background:#00e67618;color:var(--green)}.badge.saved{background:#5a608018;color:var(--muted)}.badge.long{background:#00e67618;color:var(--green)}.badge.short{background:#ff3d5718;color:var(--red)}.badge.open{background:#2979ff18;color:var(--blue)}.badge.closed{background:#5a608018;color:var(--muted)}
+.status-card,.metric{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:10px}.metric-label{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em}.metric-value{font-size:18px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
+.chart-wrap{height:380px;position:relative;background:#0b0d14}#price-chart{height:100%;width:100%}.chart-state{position:absolute;left:12px;top:12px;z-index:2;background:#0b0d14d9;border:1px solid var(--line);border-radius:4px;padding:8px 10px;min-width:250px;pointer-events:none}.chart-state-title{font-size:10px;color:var(--muted);font-weight:900;letter-spacing:.08em;text-transform:uppercase}.chart-state-main{font-size:13px;font-weight:900;margin-top:3px;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chart-state-sub{display:flex;gap:8px;flex-wrap:wrap;margin-top:5px;font-size:11px;color:var(--muted)}
+.positions-metrics{display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:8px;margin-bottom:10px}.sync-strip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.table-wrap{overflow:auto;max-height:285px;border:1px solid var(--line);border-radius:4px;background:var(--panel2)}.wide-table{min-width:920px}table{width:100%;border-collapse:collapse;font-size:11px}th{position:sticky;top:0;background:#151827;color:var(--muted);font-size:10px;text-align:left;padding:7px;border-bottom:1px solid var(--line);white-space:nowrap}td{padding:7px;border-bottom:1px solid #1d2032;white-space:nowrap}tr:last-child td{border-bottom:0}
+.log{height:160px;overflow:auto;background:#0d101a;border:1px solid var(--line);border-radius:4px}.log-line{display:grid;grid-template-columns:72px 1fr;gap:8px;padding:6px 8px;border-bottom:1px solid #1d2032;font-size:11px}.log-time{color:var(--muted)}.empty{color:var(--muted);padding:14px;text-align:center}
+@media (max-width:1000px){.page{grid-template-rows:auto 1fr}.header{position:static;align-items:flex-start;padding:12px;flex-wrap:wrap}.main{grid-template-columns:1fr}.grid3{grid-template-columns:1fr 1fr}}
+@media (max-width:560px){.grid2,.grid3,.positions-metrics{grid-template-columns:1fr}.status-strip{justify-content:flex-start}}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="header">
+    <div class="brand"><span>ALL-IN-ONE</span> Strategy Bot</div>
+    <div class="price" id="price">--</div>
+    <div class="spacer"></div>
+    <div class="status-strip">
+      <span class="pill mode">10 STRATEGIES</span>
+      <span class="pill"><span class="dot" id="run-dot"></span><span id="run-label">STOPPED</span></span>
+      <span class="pill">K <span id="ws-kline" class="neg">OFF</span></span>
+      <span class="pill">T <span id="ws-ticker" class="neg">OFF</span></span>
+      <a class="link-btn" href="/pine.html">Pine Upload</a>
+      <form method="POST" action="/logout" style="margin:0"><button class="ghost-btn" type="submit">Logout</button></form>
+    </div>
+  </header>
+  <main class="main">
+    <div class="stack">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">10 All-in-One Strategies</div>
+          <button class="link-btn" type="button" onclick="loadStrategies()">Refresh</button>
+        </div>
+        <div class="panel-body">
+          <div id="strategy-list" class="script-list"><div class="empty">Loading strategies...</div></div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Common Strategy Settings</div>
+          <div class="muted" id="session-badge">No session</div>
+        </div>
+        <div class="panel-body">
+          <div id="selected-status" class="status-card muted">Timeframe, capital, and exchange settings apply to all 10 strategies. Target and SL are automatic.</div>
+          <div class="grid2" style="margin-top:10px">
+            <div class="field"><label class="label" for="timeframe">Timeframe</label><select class="inp" id="timeframe"><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option></select></div>
+            <div class="field"><label class="label" for="capital">Total capital</label><input class="inp" id="capital" type="number" min="100" step="100" value="1000"></div>
+          </div>
+          <div class="grid2" style="margin-top:8px">
+            <div class="field"><label class="label" for="exchange-provider">Exchange name</label><select class="inp" id="exchange-provider"><option value="delta-demo">Delta Exchange Demo</option></select></div>
+            <div class="field"><label class="label">Auto exits</label><div class="status-card muted">Strategies decide Target, SL, and trailing from their built-in ATR logic.</div></div>
+          </div>
+          <label class="check-row" style="margin-top:8px"><input id="exchange-enabled" type="checkbox"><span>Connect selected exchange and place orders on buy/sell signals</span></label>
+          <div class="muted" id="exchange-key-state" style="margin-top:6px">Exchange keys loading...</div>
+          <div class="btn-row">
+            <button class="ghost-btn" type="button" onclick="saveSettings()">Save Settings</button>
+            <button class="solid-btn" id="btn-start" type="button" onclick="startSelected()">Start</button>
+            <button class="danger-btn" id="btn-stop" type="button" onclick="stopSelected()">Stop</button>
+            <button class="ghost-btn" id="btn-pause" type="button" onclick="pauseSelected()">Pause</button>
+            <button class="ghost-btn" id="btn-resume" type="button" onclick="resumeSelected()">Resume</button>
+            <button class="ghost-btn" type="button" onclick="resetSelected()">Reset</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="stack">
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">BTC Candles / Orders / Strategy State</div><div class="muted" id="chart-last">Waiting for candles</div></div>
+        <div class="chart-wrap">
+          <div id="chart-state" class="chart-state">
+            <div class="chart-state-title">Selected All-in-One</div>
+            <div class="chart-state-main" id="chart-strategy">No strategy selected</div>
+            <div class="chart-state-sub"><span id="chart-run-state">Stopped</span><span id="chart-pos-state">Flat</span><span id="chart-pnl-state">P&L --</span></div>
+          </div>
+          <div id="price-chart"></div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Exchange Positions / PNL</div><div class="muted" id="positions-updated-at">Waiting for exchange sync</div></div>
+        <div class="panel-body">
+          <div class="sync-strip"><span class="pill" id="positions-delta-pill">DELTA --</span><span class="pill" id="positions-bot-pill">BOTS --</span><button class="link-btn" type="button" onclick="loadPositions(true)">Force Sync</button></div>
+          <div class="positions-metrics">
+            <div class="metric"><div class="metric-label">Open</div><div class="metric-value" id="pos-open-count">0</div></div>
+            <div class="metric"><div class="metric-label">Closed</div><div class="metric-value" id="pos-closed-count">0</div></div>
+            <div class="metric"><div class="metric-label">Open PNL</div><div class="metric-value" id="pos-open-pnl">$0.00</div></div>
+            <div class="metric"><div class="metric-label">Closed PNL</div><div class="metric-value" id="pos-closed-pnl">$0.00</div></div>
+            <div class="metric"><div class="metric-label">Net PNL</div><div class="metric-value" id="pos-net-pnl">$0.00</div></div>
+          </div>
+          <div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Time</th><th>Session</th></tr></thead><tbody id="positions-open-body"><tr><td colspan="10" class="muted">No open positions.</td></tr></tbody></table></div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Closed Positions</div><div class="muted" id="positions-closed-sub">Realized PNL</div></div>
+        <div class="panel-body"><div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Reason</th><th>Exit Time</th><th>Session</th></tr></thead><tbody id="positions-closed-body"><tr><td colspan="11" class="muted">No closed positions.</td></tr></tbody></table></div></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Delta Demo Orders</div><div class="muted">Last 100 mirrored orders</div></div>
+        <div class="panel-body"><div class="table-wrap"><table class="wide-table"><thead><tr><th>Status</th><th>Action</th><th>Strategy</th><th>Side</th><th>Product</th><th>Size</th><th>Bot Lots</th><th>Error</th><th>Time</th></tr></thead><tbody id="positions-orders-body"><tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr></tbody></table></div></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Activity</div><button class="ghost-btn" type="button" onclick="clearLog()">Clear</button></div>
+        <div class="panel-body"><div id="log" class="log"></div></div>
+      </section>
+    </div>
+  </main>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const socket = io();
+let strategies = [];
+let selectedKey = null;
+let aggregateState = { running:false, runningCount:0, warmedUp:false, paused:false };
+let runningState = { running:false, paused:false, warmedUp:false };
+let rawCandles = [];
+let latestStats = {};
+let currentPrice = null;
+let exchanges = [];
+let priceChart = null;
+let candleSeries = null;
+let markerData = [];
+let positionLines = {};
+
+function esc (value) { return String(value ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m])); }
+function fmtUSD (n) { const v = Number(n || 0); return (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+function fmtPct (n) { const v = Number(n || 0); return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
+function fmtTime (v) { return v ? new Date(v).toLocaleString([], { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '--'; }
+async function api (path, opts = {}) { const res = await fetch(path, opts); const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || res.statusText); return data; }
+function selectedStrategy () { return strategies.find(s => s.key === selectedKey) || null; }
+function pnlCls (n) { return Number(n) > 0 ? 'pos' : (Number(n) < 0 ? 'neg' : ''); }
+function badge (txt, kind) { return `<span class="badge ${esc(kind || '')}">${esc(txt || '--')}</span>`; }
+function exchangeNameFor (provider = 'delta-demo') { return exchanges.find(e => e.provider === provider)?.name || 'Delta Exchange Demo'; }
+function options () {
+  return {
+    timeframe: $('timeframe').value,
+    capital: Number($('capital').value) || 1000,
+    exchangeEnabled: $('exchange-enabled').checked,
+    exchangeProvider: $('exchange-provider').value || 'delta-demo',
+  };
+}
+function setOptions (s = {}) {
+  $('timeframe').value = s.timeframe || '5m';
+  $('capital').value = s.capital || 1000;
+  $('exchange-enabled').checked = Boolean(s.exchangeEnabled);
+  $('exchange-provider').value = s.exchangeProvider || 'delta-demo';
+}
+function addLog (level, msg) {
+  const row = document.createElement('div');
+  row.className = 'log-line';
+  const cls = level === 'error' ? 'neg' : level === 'success' ? 'pos' : level === 'warn' ? 'warn' : '';
+  row.innerHTML = `<div class="log-time">${fmtTime(Date.now())}</div><div class="${cls}">${esc(msg)}</div>`;
+  $('log').prepend(row);
+  while ($('log').children.length > 120) $('log').lastChild.remove();
+}
+function clearLog () { $('log').innerHTML = ''; }
+function updateHeaderStatus (status = aggregateState) {
+  aggregateState = { ...aggregateState, ...status };
+  const dot = $('run-dot');
+  const label = $('run-label');
+  if (aggregateState.running) {
+    dot.className = aggregateState.warmedUp ? 'dot live' : 'dot warm';
+    label.textContent = `${aggregateState.runningCount || 1} LIVE`;
+    label.className = aggregateState.warmedUp ? 'pos' : 'warn';
+  } else {
+    dot.className = 'dot';
+    label.textContent = 'STOPPED';
+    label.className = '';
+  }
+}
+function renderStrategies (rows = strategies) {
+  strategies = Array.isArray(rows) ? rows : [];
+  if (strategies.length && !strategies.some(s => s.key === selectedKey)) selectedKey = strategies.find(s => s.status?.running)?.key || strategies[0].key;
+  $('strategy-list').innerHTML = strategies.length ? strategies.map(s => {
+    const bits = [
+      s.timeframe,
+      s.exchangeEnabled ? exchangeNameFor(s.exchangeProvider) : 'Paper',
+      `Cap ${fmtUSD(s.capital)}`,
+      'Auto Target/SL',
+      s.updatedAt ? fmtTime(s.updatedAt) : null,
+    ].filter(Boolean).join(' / ');
+    const running = s.status?.running;
+    return `<div class="script-row ${s.key === selectedKey ? 'active' : ''}" onclick="selectStrategy('${esc(s.key)}')">
+      <div><div class="script-name">${esc(s.name)}</div><div class="script-meta">${esc(bits)}</div></div>
+      <div class="row-actions">
+        <span class="badge ${running || s.isActive ? 'active' : 'saved'}">${running ? (s.status.paused ? 'PAUSED' : 'RUNNING') : (s.exchangeEnabled ? 'EXCHANGE' : 'READY')}</span>
+        <button class="toggle-btn ${running ? 'stop' : 'start'}" type="button" onclick="toggleStrategy(event,'${esc(s.key)}')">${running ? 'Stop' : 'Start'}</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">No strategies loaded.</div>';
+  const selected = selectedStrategy();
+  if (selected) {
+    setOptions(selected);
+    updateStatus(selected.status || {});
+    applyStats(selected.stats || {});
+    applySessionInfo(selected.session);
+  }
+}
+function selectStrategy (key) {
+  selectedKey = key;
+  renderStrategies();
+  updateChartState();
+  loadPositions(false).catch(() => {});
+}
+async function loadStrategies () { renderStrategies(await api('/api/allinone/strategies')); }
+async function loadCommonSettings () {
+  const settings = await api('/api/allinone/settings');
+  setOptions(settings);
+}
+async function loadExchanges () {
+  const data = await api('/api/exchanges');
+  exchanges = data.exchanges || [];
+  const st = exchanges.find(e => e.provider === 'delta-demo');
+  $('exchange-key-state').textContent = st ? `${st.name} ${st.enabled ? 'enabled' : 'disabled'} / ${st.configured ? (st.maskedApiKey || 'key saved') : 'no key saved'}` : 'No exchange configured';
+  $('exchange-key-state').className = st?.enabled && st?.configured ? 'pos' : 'muted';
+}
+async function persistCommonSettings () {
+  return api('/api/allinone/settings', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
+}
+function applySessionInfo (info) { $('session-badge').textContent = !info ? 'No session' : (!info.isRunning ? 'STOPPED' : info.paused ? 'PAUSED' : 'RUNNING'); }
+function updateStatus (status = {}) {
+  runningState = { ...runningState, ...status };
+  $('btn-start').disabled = runningState.running && !runningState.paused;
+  $('btn-stop').disabled = !runningState.running;
+  $('btn-pause').disabled = !runningState.running || runningState.paused;
+  $('btn-resume').disabled = !runningState.running || !runningState.paused;
+  updateChartState();
+}
+function applyStats (stats = {}) {
+  latestStats = stats || {};
+  markerData = (latestStats.recentTrades || []).map(t => ({ time: Math.floor((t.exitTime || Date.now()) / 1000), position: t.pnl >= 0 ? 'aboveBar' : 'belowBar', color: t.pnl >= 0 ? '#00e676' : '#ff3d57', shape: t.type === 'long' ? 'arrowUp' : 'arrowDown', text: `${String(t.type || '').toUpperCase()} ${fmtUSD(t.pnl)}` }));
+  if (candleSeries) candleSeries.setMarkers(markerData);
+  updateChartState();
+}
+async function saveSettings () {
+  try {
+    await persistCommonSettings();
+    await loadStrategies();
+    addLog('success', 'Common All-in-One settings saved for all strategies.');
+  } catch (err) { addLog('error', `Save failed: ${err.message}`); }
+}
+async function startSelected () {
+  if (!selectedKey) return addLog('error', 'Select a strategy first.');
+  try {
+    await persistCommonSettings();
+    await api(`/api/allinone/strategies/${selectedKey}/start`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
+    await loadStrategies();
+    addLog('success', 'All-in-One strategy started.');
+  } catch (err) { addLog('error', `Start failed: ${err.message}`); }
+}
+async function toggleStrategy (event, key) {
+  event.stopPropagation();
+  const row = strategies.find(s => s.key === key);
+  if (!row) return;
+  selectedKey = key;
+  try {
+    if (row.status?.running) {
+      await api(`/api/allinone/strategies/${key}/stop`, { method:'POST' });
+      addLog('success', `${row.name} stopped.`);
+    } else {
+      await persistCommonSettings();
+      await api(`/api/allinone/strategies/${key}/start`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
+      addLog('success', `${row.name} started.`);
+    }
+    await loadStrategies();
+  } catch (err) {
+    addLog('error', `${row.status?.running ? 'Stop' : 'Start'} failed: ${err.message}`);
+  }
+}
+async function stopSelected () {
+  if (!selectedKey) return addLog('error', 'Select a strategy first.');
+  try { await api(`/api/allinone/strategies/${selectedKey}/stop`, { method:'POST' }); await loadStrategies(); addLog('success', 'Strategy stopped.'); }
+  catch (err) { addLog('error', `Stop failed: ${err.message}`); }
+}
+async function pauseSelected () {
+  if (!selectedKey) return addLog('error', 'Select a strategy first.');
+  try { await api(`/api/allinone/strategies/${selectedKey}/pause`, { method:'POST' }); await loadStrategies(); addLog('warn', 'Strategy paused.'); }
+  catch (err) { addLog('error', `Pause failed: ${err.message}`); }
+}
+async function resumeSelected () {
+  if (!selectedKey) return addLog('error', 'Select a strategy first.');
+  try { await api(`/api/allinone/strategies/${selectedKey}/resume`, { method:'POST' }); await loadStrategies(); addLog('success', 'Strategy resumed.'); }
+  catch (err) { addLog('error', `Resume failed: ${err.message}`); }
+}
+async function resetSelected () {
+  if (!selectedKey || !confirm('Reset selected All-in-One strategy session?')) return;
+  try { await api(`/api/allinone/strategies/${selectedKey}/reset`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) }); await loadStrategies(); addLog('warn', 'Strategy reset.'); }
+  catch (err) { addLog('error', `Reset failed: ${err.message}`); }
+}
+function initChart () {
+  priceChart = LightweightCharts.createChart($('price-chart'), { layout:{ background:{ color:'#0b0d14' }, textColor:'#8892b0' }, grid:{ vertLines:{ color:'#171b2b' }, horzLines:{ color:'#171b2b' } }, timeScale:{ timeVisible:true, secondsVisible:false }, rightPriceScale:{ borderColor:'#252840' } });
+  candleSeries = priceChart.addCandlestickSeries({ upColor:'#00e676', downColor:'#ff3d57', wickUpColor:'#00e676', wickDownColor:'#ff3d57', borderVisible:false });
+}
+function candleTime (c) { return Math.floor(c.openTime / 1000); }
+function renderCandles (candles = []) {
+  rawCandles = candles.slice(-500);
+  if (!candleSeries) return;
+  candleSeries.setData(rawCandles.map(c => ({ time:candleTime(c), open:c.open, high:c.high, low:c.low, close:c.close })));
+  candleSeries.setMarkers(markerData);
+  const last = rawCandles[rawCandles.length - 1];
+  if (last) $('chart-last').textContent = fmtTime(last.openTime);
+  renderChartPosition(latestStats.position);
+  priceChart.timeScale().scrollToRealTime();
+}
+function clearPositionLines () {
+  Object.values(positionLines).forEach(line => { try { candleSeries.removePriceLine(line); } catch (e) {} });
+  positionLines = {};
+}
+function renderChartPosition (pos) {
+  clearPositionLines();
+  if (!candleSeries || !pos) return;
+  if (Number.isFinite(Number(pos.entry))) positionLines.entry = candleSeries.createPriceLine({ price:Number(pos.entry), color:'#f48fb1', lineWidth:1, title:'ENTRY' });
+  if (Number.isFinite(Number(pos.trailSl || pos.sl))) positionLines.sl = candleSeries.createPriceLine({ price:Number(pos.trailSl || pos.sl), color:'#ff3d57', lineWidth:1, lineStyle:2, title:'SL' });
+  if (Number.isFinite(Number(pos.tp))) positionLines.tp = candleSeries.createPriceLine({ price:Number(pos.tp), color:'#00e676', lineWidth:1, lineStyle:2, title:'TP' });
+}
+function updateChartState () {
+  const s = selectedStrategy();
+  $('chart-strategy').textContent = s?.name || 'No strategy selected';
+  const run = !s ? 'Stopped' : runningState.running ? (runningState.paused ? 'Paused' : (runningState.warmedUp ? 'Live' : 'Warming')) : 'Stopped';
+  $('chart-run-state').textContent = `${run}${s?.timeframe ? ' / ' + s.timeframe : ''}`;
+  const pos = latestStats.position;
+  $('chart-pos-state').innerHTML = pos ? `<span class="${pos.type === 'long' ? 'pos' : 'neg'}">${String(pos.type).toUpperCase()}</span> @ ${fmtUSD(pos.entry)}` : 'Flat';
+  const pnl = Number(latestStats.totalPnl || 0);
+  $('chart-pnl-state').innerHTML = `P&L <span class="${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</span>`;
+  renderChartPosition(pos);
+  $('selected-status').innerHTML = s ? `<b>${esc(s.name)}</b><br><span class="muted">${esc(s.timeframe)} / ${s.exchangeEnabled ? esc(exchangeNameFor(s.exchangeProvider)) : 'Paper'} / Capital ${fmtUSD(s.capital)}</span>` : 'Select a strategy.';
+}
+function setPnlMetric (id, value) { const el = $(id); el.className = `metric-value ${pnlCls(value)}`; el.textContent = fmtUSD(value); }
+function renderPositions (data = {}) {
+  const summary = data.summary || {};
+  $('pos-open-count').textContent = summary.openCount ?? 0;
+  $('pos-closed-count').textContent = summary.closedCount ?? 0;
+  setPnlMetric('pos-open-pnl', summary.openPnl || 0);
+  setPnlMetric('pos-closed-pnl', summary.closedPnl || 0);
+  setPnlMetric('pos-net-pnl', summary.netPnl || 0);
+  const delta = data.delta || {};
+  $('positions-delta-pill').textContent = delta.enabled ? `DELTA ON ${delta.productSymbol || ''}` : 'DELTA OFF';
+  $('positions-delta-pill').className = `pill ${delta.enabled && !delta.lastError ? 'pos' : 'neg'}`;
+  const running = Number(data.botStatus?.runningCount || 0);
+  $('positions-bot-pill').textContent = running ? `BOTS ${running} LIVE` : 'BOTS STOPPED';
+  $('positions-updated-at').textContent = `${data.source === 'delta' ? 'Exchange synced' : 'Local data'} ${new Date().toLocaleTimeString()}`;
+  $('positions-open-body').innerHTML = (data.open || []).length ? data.open.map(p => `<tr><td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td><td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${Number(p.size || p.qty || 0).toFixed(0)}</td><td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td><td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="10" class="muted">No open positions.</td></tr>';
+  const closed = data.closed || [];
+  $('positions-closed-sub').textContent = `${closed.length} closed`;
+  $('positions-closed-body').innerHTML = closed.length ? closed.map(t => `<tr><td>${badge('closed','closed')}</td><td>${esc(t.strategyName || '--')}</td><td>${badge(t.type,t.type)}</td><td>${fmtUSD(t.entry)}</td><td>${fmtUSD(t.exit)}</td><td>${Number(t.size || t.qty || 0).toFixed(0)}</td><td class="${pnlCls(t.pnl)}">${fmtUSD(t.pnl)}</td><td class="${pnlCls(t.pnlPct)}">${fmtPct(t.pnlPct)}</td><td>${esc(t.reason || '--')}</td><td>${fmtTime(t.exitTime)}</td><td>${esc(t.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="11" class="muted">No closed positions.</td></tr>';
+  const orders = data.exchangeOrders || [];
+  $('positions-orders-body').innerHTML = orders.length ? orders.map(o => `<tr><td class="${o.status === 'sent' ? 'pos' : (o.status === 'failed' ? 'neg' : 'warn')}">${esc(String(o.status || '--').toUpperCase())}</td><td>${esc(o.action || '--')}</td><td>${esc(o.strategyName || o.runnerId || '--')}</td><td>${esc(o.side || '--')}</td><td>${esc(o.productSymbol || '--')}</td><td>${Number(o.size || 0).toFixed(0)}</td><td>${Number(o.requestedQty || 0).toFixed(0)}</td><td class="neg">${esc(o.error || '')}</td><td>${fmtTime(o.createdAt)}</td></tr>`).join('') : '<tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr>';
+}
+async function loadPositions (forced = false) {
+  const data = await api(`/api/positions?limit=1000${forced ? '&force=1' : ''}`);
+  renderPositions(data);
+}
+async function loadInitial () {
+  await loadExchanges().catch(err => addLog('error', `Exchange load failed: ${err.message}`));
+  await loadStrategies().catch(err => addLog('error', `Strategies load failed: ${err.message}`));
+  await loadCommonSettings().catch(err => addLog('error', `Common settings load failed: ${err.message}`));
+  const candles = await api('/api/candles').catch(() => []);
+  if (Array.isArray(candles)) renderCandles(candles);
+  await loadPositions(false).catch(err => addLog('error', `Positions load failed: ${err.message}`));
+}
+socket.on('ticker', t => { currentPrice = Number(t.price); $('price').textContent = fmtUSD(t.price); });
+socket.on('candles', renderCandles);
+socket.on('candle_tick', c => { if (rawCandles.length) { const next = rawCandles.slice(); if (next[next.length - 1]?.openTime === c.openTime) next[next.length - 1] = c; else next.push(c); renderCandles(next); } });
+socket.on('ws_status', s => { $('ws-kline').textContent = s.kline ? 'ON' : 'OFF'; $('ws-kline').className = s.kline ? 'pos' : 'neg'; $('ws-ticker').textContent = s.ticker ? 'ON' : 'OFF'; $('ws-ticker').className = s.ticker ? 'pos' : 'neg'; });
+socket.on('allinone:status', updateHeaderStatus);
+socket.on('allinone:runners', renderStrategies);
+socket.on('allinone:runner_event', payload => {
+  const row = strategies.find(s => s.key === payload.key);
+  if (row) { row.status = payload.status || row.status; row.stats = payload.stats || row.stats; }
+  if (payload.key === selectedKey) {
+    if (payload.status) updateStatus(payload.status);
+    if (payload.stats) applyStats(payload.stats);
+    if (payload.event === 'session_info') applySessionInfo(payload.data);
+    if (payload.event === 'position_opened') addLog('success', `${row?.name || payload.key} opened ${payload.data?.type || ''}.`);
+    if (payload.event === 'trade_closed') { addLog(payload.data?.pnl >= 0 ? 'success' : 'warn', `${row?.name || payload.key} closed ${fmtUSD(payload.data?.pnl)}.`); loadPositions(true).catch(() => {}); }
+  }
+  renderStrategies();
+});
+socket.on('exchange:sync', () => loadPositions(false).catch(() => {}));
+socket.on('log', l => { const id = String(l.strategyId || l.strategy || ''); if (!id || id.startsWith('allinone:')) addLog(l.level || 'info', l.msg || ''); });
+socket.on('connect', () => addLog('success', 'Connected to server.'));
+socket.on('disconnect', () => addLog('error', 'Disconnected from server.'));
+window.addEventListener('load', () => {
+  initChart();
+  updateHeaderStatus();
+  loadInitial();
+  setInterval(() => loadPositions(false).catch(() => {}), 30000);
+  addLog('info', 'All-in-One Strategy Bot page ready.');
+});
+</script>
+</body>
+</html>

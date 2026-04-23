@@ -9,12 +9,13 @@ const path       = require('path');
 const crypto     = require('crypto');
 
 const db                                      = require('./db');
-const { Session, PineScriptConfig, Trade, Position, ExchangeOrder, ExchangeCredential } = db;
+const { Session, PineScriptConfig, AllInOneStrategyConfig, Trade, Position, ExchangeOrder, ExchangeCredential } = db;
 const { BotManager, StrategyRunner }         = require('./bot-manager');
 const { ScalpingStrategy }                   = require('./strategies/scalping');
 const { RangeBreakoutStrategy }              = require('./strategies/breakout');
 const { HeikenAshiSupertrendStrategy }       = require('./strategies/heikenashi_supertrend');
 const { PineScriptStrategy }                 = require('./strategies/pine_adapter');
+const { AllInOneStrategy, ALL_IN_ONE_DEFINITIONS, TIMEFRAME_MS } = require('./strategies/all_in_one');
 const { DeltaDemoClient }                    = require('./delta-exchange');
 
 const SYMBOL_REST = 'BTCUSDT';
@@ -23,6 +24,13 @@ const CANDLE_MS = 5 * 60 * 1000;
 const EXCHANGE_PROVIDERS = [
   { provider: 'delta-demo', name: 'Delta Exchange Demo' },
 ];
+const ALL_IN_ONE_AUTO_RISK = {
+  riskPerTradePct: 1,
+  atrLength: 14,
+  slMultiplier: 2,
+  tpMultiplier: 4,
+  trailOffset: 1.5,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Auth config  (set via .env)
@@ -189,6 +197,7 @@ const scalpRunner    = new StrategyRunner('scalping',    new ScalpingStrategy({ 
 const breakoutRunner = new StrategyRunner('breakout',    new RangeBreakoutStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { executionAdapter: deltaClient, displayName: 'Range Breakout', onExchangeOrder: queueExchangeOrderSync });
 const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertrendStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { executionAdapter: deltaClient, displayName: 'Heikin-Ashi SuperTrend', onExchangeOrder: queueExchangeOrderSync });
 const pineRunners    = new Map(); // scriptId -> StrategyRunner
+const allInOneRunners = new Map(); // strategyKey -> StrategyRunner
 const EXCHANGE_SYNC_INTERVAL_MS = 30 * 1000;
 const STRATEGY_WATCHDOG_INTERVAL_MS = 30 * 1000;
 let exchangeSyncTimer = null;
@@ -471,6 +480,195 @@ function pineStrategyOptions (doc) {
   };
 }
 
+function allInOneRunnerId (key) {
+  return `allinone:${key}`;
+}
+
+function allInOneDefaultConfig (def) {
+  return {
+    key: def.key,
+    name: def.name,
+    timeframe: '5m',
+    capital: 1000,
+    ...ALL_IN_ONE_AUTO_RISK,
+    exchangeEnabled: false,
+    exchangeProvider: 'delta-demo',
+    isActive: false,
+  };
+}
+
+async function ensureAllInOneConfigs () {
+  await Promise.all(ALL_IN_ONE_DEFINITIONS.map(def => {
+    const insertDefaults = allInOneDefaultConfig(def);
+    delete insertDefaults.name;
+    return AllInOneStrategyConfig.updateOne(
+      { key: def.key },
+      { $setOnInsert: insertDefaults, $set: { name: def.name } },
+      { upsert: true }
+    );
+  }));
+}
+
+function allInOneListItem (doc) {
+  return {
+    key: doc.key,
+    name: doc.name,
+    timeframe: doc.timeframe || '5m',
+    capital: doc.capital || 1000,
+    riskPerTradePct: doc.riskPerTradePct || 1,
+    atrLength: doc.atrLength || 14,
+    slMultiplier: doc.slMultiplier || 2,
+    tpMultiplier: doc.tpMultiplier || 4,
+    trailOffset: doc.trailOffset || 1.5,
+    exchangeEnabled: Boolean(doc.exchangeEnabled),
+    exchangeProvider: doc.exchangeProvider || 'delta-demo',
+    isActive: Boolean(doc.isActive),
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function allInOneStrategyOptions (doc) {
+  return {
+    strategyKey: doc.key,
+    timeframe: TIMEFRAME_MS[doc.timeframe] ? doc.timeframe : '5m',
+    capital: doc.capital || 1000,
+    ...ALL_IN_ONE_AUTO_RISK,
+  };
+}
+
+function applyAllInOneRuntimeOptions (doc, body = {}) {
+  if (body.timeframe !== undefined && TIMEFRAME_MS[String(body.timeframe)]) doc.timeframe = String(body.timeframe);
+  if (body.capital !== undefined) doc.capital = Math.max(100, Number(body.capital) || doc.capital || 1000);
+  Object.assign(doc, ALL_IN_ONE_AUTO_RISK);
+  if (body.exchangeEnabled !== undefined) doc.exchangeEnabled = Boolean(body.exchangeEnabled);
+  if (body.exchangeProvider !== undefined && providerMeta(String(body.exchangeProvider))) doc.exchangeProvider = String(body.exchangeProvider);
+  if (!doc.exchangeProvider) doc.exchangeProvider = 'delta-demo';
+}
+
+function allInOneAggregateStatus () {
+  const runners = [...allInOneRunners.values()];
+  const runningRunners = runners.filter(r => r.running);
+  return {
+    id: 'allinone',
+    running: runningRunners.length > 0,
+    paused: runningRunners.length > 0 && runningRunners.every(r => r.paused),
+    warmedUp: runningRunners.length > 0 && runningRunners.every(r => r.strategy.warmedUp),
+    count: runners.length,
+    runningCount: runningRunners.length,
+  };
+}
+
+async function allInOneRunnerSnapshot (doc) {
+  const item = allInOneListItem(doc);
+  const runner = allInOneRunners.get(item.key);
+  const status = runner?._status() || { id: allInOneRunnerId(item.key), running: false, paused: false, warmedUp: false };
+  const session = runner ? await runner.buildSessionInfo().catch(() => null) : null;
+  return {
+    ...item,
+    runnerId: allInOneRunnerId(item.key),
+    status,
+    session,
+    stats: runner ? runner.strategy.getFullState() : null,
+  };
+}
+
+async function listAllInOneDetailed () {
+  await ensureAllInOneConfigs();
+  const docs = await AllInOneStrategyConfig.find().sort({ key: 1 }).lean();
+  const order = new Map(ALL_IN_ONE_DEFINITIONS.map((def, index) => [def.key, index]));
+  docs.sort((a, b) => (order.get(a.key) ?? 999) - (order.get(b.key) ?? 999));
+  return Promise.all(docs.map(allInOneRunnerSnapshot));
+}
+
+function commonAllInOneSettings (doc) {
+  return {
+    timeframe: doc?.timeframe || '5m',
+    capital: doc?.capital || 1000,
+    exchangeEnabled: Boolean(doc?.exchangeEnabled),
+    exchangeProvider: doc?.exchangeProvider || 'delta-demo',
+    autoRisk: ALL_IN_ONE_AUTO_RISK,
+  };
+}
+
+async function saveCommonAllInOneSettings (body = {}) {
+  await ensureAllInOneConfigs();
+  const patch = {
+    timeframe: TIMEFRAME_MS[String(body.timeframe)] ? String(body.timeframe) : '5m',
+    capital: Math.max(100, Number(body.capital) || 1000),
+    exchangeEnabled: Boolean(body.exchangeEnabled),
+    exchangeProvider: providerMeta(String(body.exchangeProvider)) ? String(body.exchangeProvider) : 'delta-demo',
+    ...ALL_IN_ONE_AUTO_RISK,
+  };
+  await AllInOneStrategyConfig.updateMany({}, { $set: patch });
+  for (const runner of allInOneRunners.values()) {
+    runner.executionEnabled = Boolean(patch.exchangeEnabled);
+    if (!runner.running) {
+      runner.strategy.reset({
+        strategyKey: runner.strategy.strategyKey,
+        timeframe: patch.timeframe,
+        capital: patch.capital,
+        ...ALL_IN_ONE_AUTO_RISK,
+      });
+    }
+  }
+  return patch;
+}
+
+async function emitAllInOneState () {
+  io.emit('allinone:status', allInOneAggregateStatus());
+  io.emit('allinone:runners', await listAllInOneDetailed());
+  io.emit('all_status', manager.allStatus());
+}
+
+function hookAllInOneRunnerEvents (runner, key) {
+  if (runner._allInOneHooked) return;
+  runner._allInOneHooked = true;
+  const rawEmit = runner.emit.bind(runner);
+  runner.emit = (event, data) => {
+    rawEmit(event, data);
+    io.emit('allinone:runner_event', {
+      key,
+      runnerId: runner.id,
+      event,
+      data,
+      status: runner._status(),
+      stats: runner.strategy.getFullState(),
+    });
+    if (['status', 'stats', 'session_info', 'position_opened', 'trade_closed', 'warmed_up'].includes(event)) {
+      emitAllInOneState().catch(e => console.error('[ALLINONE] emit state failed:', e.message));
+    }
+  };
+}
+
+function ensureAllInOneRunner (doc) {
+  const key = doc.key;
+  let runner = allInOneRunners.get(key);
+  if (!runner) {
+    runner = new StrategyRunner(
+      allInOneRunnerId(key),
+      new AllInOneStrategy(allInOneStrategyOptions(doc)),
+      io,
+      {
+        sessionStrategyType: allInOneRunnerId(key),
+        displayName: doc.name,
+        executionAdapter: deltaClient,
+        executionEnabled: Boolean(doc.exchangeEnabled),
+        onExchangeOrder: queueExchangeOrderSync,
+      }
+    );
+    allInOneRunners.set(key, runner);
+    manager.addRunner(runner);
+    hookAllInOneRunnerEvents(runner, key);
+    runner.wire();
+  } else {
+    runner.displayName = doc.name;
+    runner.executionEnabled = Boolean(doc.exchangeEnabled);
+    if (!runner.running) runner.strategy.reset(allInOneStrategyOptions(doc));
+    runner.wire();
+  }
+  return runner;
+}
+
 const STRATEGY_LABELS = {
   scalping: 'EMA Scalping',
   breakout: 'Range Breakout',
@@ -562,6 +760,10 @@ function strategyNameForSession (session, pineMap) {
   if (type === 'pine') {
     const pine = pineMap.get(idString(session.pineScriptId));
     return pine ? `Pine: ${pine.name}` : 'Pine Strategy';
+  }
+  if (type.startsWith?.('allinone:')) {
+    const key = type.slice('allinone:'.length);
+    return ALL_IN_ONE_DEFINITIONS.find(def => def.key === key)?.name || type;
   }
   return STRATEGY_LABELS[type] || type;
 }
@@ -1384,6 +1586,112 @@ app.post('/api/pine/backtest', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/allinone/strategies', async (_req, res) => {
+  try { res.json(await listAllInOneDetailed()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/allinone/settings', async (_req, res) => {
+  try {
+    await ensureAllInOneConfigs();
+    const doc = await AllInOneStrategyConfig.findOne().sort({ updatedAt: -1 }).lean();
+    res.json(commonAllInOneSettings(doc));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/allinone/settings', async (req, res) => {
+  try {
+    const settings = await saveCommonAllInOneSettings(req.body || {});
+    await emitAllInOneState();
+    res.json({ ok: true, settings });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/allinone/strategies/:key', async (req, res) => {
+  try {
+    await ensureAllInOneConfigs();
+    const doc = await AllInOneStrategyConfig.findOne({ key: req.params.key }).lean();
+    if (!doc) return res.status(404).json({ error: 'All-in-one strategy not found' });
+    res.json(await allInOneRunnerSnapshot(doc));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/allinone/strategies/:key/settings', async (req, res) => {
+  try {
+    await saveCommonAllInOneSettings(req.body || {});
+    const doc = await AllInOneStrategyConfig.findOne({ key: req.params.key });
+    if (!doc) return res.status(404).json({ error: 'All-in-one strategy not found' });
+    const runner = ensureAllInOneRunner(doc);
+    runner.executionEnabled = Boolean(doc.exchangeEnabled);
+    if (!runner.running) await runner.reset(allInOneStrategyOptions(doc));
+    await emitAllInOneState();
+    res.json({ ok: true, strategy: await allInOneRunnerSnapshot(doc.toObject()) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/allinone/strategies/:key/start', async (req, res) => {
+  try {
+    await ensureAllInOneConfigs();
+    if (req.body && Object.keys(req.body).length) await saveCommonAllInOneSettings(req.body);
+    const doc = await AllInOneStrategyConfig.findOne({ key: req.params.key });
+    if (!doc) return res.status(404).json({ error: 'All-in-one strategy not found' });
+    doc.isActive = true;
+    await doc.save();
+    const runner = ensureAllInOneRunner(doc);
+    runner.executionEnabled = Boolean(doc.exchangeEnabled);
+    if (req.body && Object.keys(req.body).length) await runner.reset(allInOneStrategyOptions(doc));
+    await startRunner(runner, { createNew: false });
+    await emitAllInOneState();
+    res.json({ ok: true, key: doc.key, runnerId: runner.id, sessionId: runner.sessionId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/allinone/strategies/:key/stop', async (req, res) => {
+  try {
+    const runner = allInOneRunners.get(req.params.key);
+    if (!runner) return res.status(404).json({ error: 'All-in-one runner not found' });
+    await runner.stop();
+    manager.maybeStopWs();
+    await emitAllInOneState();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/allinone/strategies/:key/pause', async (req, res) => {
+  try {
+    const runner = allInOneRunners.get(req.params.key);
+    if (!runner) return res.status(404).json({ error: 'All-in-one runner not found' });
+    runner.pause();
+    await emitAllInOneState();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/allinone/strategies/:key/resume', async (req, res) => {
+  try {
+    const runner = allInOneRunners.get(req.params.key);
+    if (!runner) return res.status(404).json({ error: 'All-in-one runner not found' });
+    runner.resume();
+    await emitAllInOneState();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/allinone/strategies/:key/reset', async (req, res) => {
+  try {
+    await ensureAllInOneConfigs();
+    if (req.body && Object.keys(req.body).length) await saveCommonAllInOneSettings(req.body);
+    const doc = await AllInOneStrategyConfig.findOne({ key: req.params.key });
+    if (!doc) return res.status(404).json({ error: 'All-in-one strategy not found' });
+    const runner = ensureAllInOneRunner(doc);
+    await runner.reset(allInOneStrategyOptions(doc));
+    manager.maybeStopWs();
+    await emitAllInOneState();
+    await manager.sendSessionsList(io);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/sessions', async (_req, res) => {
   try {
     const list = await Session.find().sort({ createdAt: -1 }).limit(40).lean();
@@ -1410,9 +1718,11 @@ io.on('connection', async socket => {
   socket.emit('pine:status', pineAggregateStatus());
   socket.emit('pine:runners', await listPineScriptsDetailed());
   socket.emit('pine:scripts', await listPineScriptsDetailed());
+  socket.emit('allinone:status', allInOneAggregateStatus());
+  socket.emit('allinone:runners', await listAllInOneDetailed());
   socket.emit('log', {
     level: 'info',
-    msg: `👋 Dashboard connected — EMA: ${scalpRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Breakout: ${breakoutRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | HA: ${haRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Pine bots: ${pineAggregateStatus().runningCount} running`,
+    msg: `👋 Dashboard connected — EMA: ${scalpRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Breakout: ${breakoutRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | HA: ${haRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Pine bots: ${pineAggregateStatus().runningCount} running | All-in-One: ${allInOneAggregateStatus().runningCount} running`,
     time: Date.now(),
   });
 });
@@ -1424,6 +1734,17 @@ async function bootstrap () {
   try { await db.connect(); }
   catch (e) { console.error('[FATAL] MongoDB:', e.message); process.exit(1); }
   await applySavedExchangeCredentials();
+  await ensureAllInOneConfigs();
+
+  const allInOneDocs = await AllInOneStrategyConfig.find().lean().catch(() => []);
+  for (const doc of allInOneDocs) {
+    const runner = ensureAllInOneRunner(doc);
+    const saved = await runner.restoreFromDB();
+    if (saved && saved.isRunning) {
+      console.log(`[Boot] Auto-resuming ${runner.id} (${doc.name})...`);
+      await startRunner(runner, { createNew: false });
+    }
+  }
 
   const runningPineSessions = await Session.find({ strategyType: 'pine', isRunning: true, pineScriptId: { $ne: null } })
     .select('pineScriptId')
