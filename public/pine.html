@@ -433,6 +433,7 @@ let activeExchangeStatus = null;
 let aggregateState = { running:false, paused:false, warmedUp:false, runningCount:0 };
 let runningState = { running:false, paused:false, warmedUp:false };
 let currentPrice = null;
+let baseCandles = [];
 let rawCandles = [];
 let latestStats = {};
 let selectedExchangeState = null;
@@ -520,6 +521,51 @@ function clearLog () {
 function selectedScript () {
   return pineScripts.find(s => s.id === selectedPineScriptId) || null;
 }
+const TF_MS = { '5m':300000, '15m':900000, '30m':1800000, '1h':3600000, '4h':14400000 };
+function chartTimeframe () {
+  return selectedScript()?.timeframe || $('timeframe')?.value || '5m';
+}
+function validCandle (c) {
+  return c && Number.isFinite(Number(c.openTime)) && Number.isFinite(Number(c.open)) &&
+    Number.isFinite(Number(c.high)) && Number.isFinite(Number(c.low)) && Number.isFinite(Number(c.close));
+}
+function sortedCandles (candles = []) {
+  const byTime = new Map();
+  for (const c of candles || []) {
+    if (!validCandle(c)) continue;
+    byTime.set(Number(c.openTime), {
+      ...c,
+      openTime:Number(c.openTime),
+      open:Number(c.open),
+      high:Number(c.high),
+      low:Number(c.low),
+      close:Number(c.close),
+      volume:Number(c.volume) || 0,
+    });
+  }
+  return [...byTime.values()].sort((a, b) => a.openTime - b.openTime);
+}
+function aggregateForChart (candles = []) {
+  const clean = sortedCandles(candles);
+  const tfMs = TF_MS[chartTimeframe()] || TF_MS['5m'];
+  if (tfMs === TF_MS['5m']) return clean;
+  const buckets = new Map();
+  for (const c of clean) {
+    const openTime = Math.floor(c.openTime / tfMs) * tfMs;
+    let bucket = buckets.get(openTime);
+    if (!bucket) {
+      bucket = { openTime, open:c.open, high:c.high, low:c.low, close:c.close, volume:0, closeTime:c.closeTime, isClosed:c.isClosed };
+      buckets.set(openTime, bucket);
+    }
+    bucket.high = Math.max(bucket.high, c.high);
+    bucket.low = Math.min(bucket.low, c.low);
+    bucket.close = c.close;
+    bucket.volume += Number(c.volume) || 0;
+    bucket.closeTime = c.closeTime || bucket.closeTime;
+    bucket.isClosed = c.isClosed;
+  }
+  return [...buckets.values()].sort((a, b) => a.openTime - b.openTime);
+}
 function selectedScriptIsLive () {
   const script = selectedScript();
   return Boolean(script?.status?.running || script?.isActive);
@@ -565,7 +611,7 @@ function initPriceChart () {
   new ResizeObserver(() => {
     priceChart.applyOptions({ width:el.clientWidth, height:el.clientHeight || 360 });
   }).observe(el);
-  if (rawCandles.length) renderCandles(rawCandles);
+  if (baseCandles.length) renderCandles(baseCandles, false);
 }
 
 function computeEMA (values, period) {
@@ -661,8 +707,9 @@ function styledCandleData (candles) {
 function candleTime (c) {
   return Math.floor(c.openTime / 1000);
 }
-function renderCandles (candles = []) {
-  rawCandles = Array.isArray(candles) ? candles.slice() : [];
+function renderCandles (candles = [], updateBase = true) {
+  if (updateBase) baseCandles = sortedCandles(candles).slice(-1000);
+  rawCandles = aggregateForChart(baseCandles);
   if (!candleSeries || !rawCandles.length) return;
   const closes = rawCandles.map(c => c.close);
   const ema8 = computeEMA(closes, 8);
@@ -679,11 +726,9 @@ function renderCandles (candles = []) {
 }
 
 function onCandleTick (c) {
-  const idx = rawCandles.findIndex(x => x.openTime === c.openTime);
-  if (idx >= 0) rawCandles[idx] = c;
-  else rawCandles.push(c);
-  if (rawCandles.length > 1000) rawCandles.shift();
-  renderCandles(rawCandles);
+  if (!validCandle(c)) return;
+  baseCandles = sortedCandles([...baseCandles, c]).slice(-1000);
+  renderCandles(baseCandles, false);
 }
 
 function clearPositionLines () {
@@ -859,7 +904,7 @@ function updatePineConfig ({
   $('script-status').innerHTML = hasScript
     ? `<div>Loaded: <b>${esc(scriptName)}</b></div>${longCond}${shortCond}${exchangeLine}${warnings}`
     : 'No Pine script loaded.';
-  if (rawCandles.length) renderCandles(rawCandles);
+  if (baseCandles.length) renderCandles(baseCandles, false);
   updateChartState();
 }
 
@@ -1184,7 +1229,7 @@ function renderTrades (trades = []) {
 }
 function applyStats (s = {}, updateMarkers = true) {
   latestStats = s;
-  if (s.indicatorSnaps && rawCandles.length) renderCandles(rawCandles);
+  if (s.indicatorSnaps && baseCandles.length) renderCandles(baseCandles, false);
   if (s.position !== undefined) renderPosition(s.position);
   if (s.recentTrades) {
     renderTrades(s.recentTrades);

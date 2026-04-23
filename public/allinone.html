@@ -151,6 +151,7 @@ let strategies = [];
 let selectedKey = null;
 let aggregateState = { running:false, runningCount:0, warmedUp:false, paused:false };
 let runningState = { running:false, paused:false, warmedUp:false };
+let baseCandles = [];
 let rawCandles = [];
 let latestStats = {};
 let currentPrice = null;
@@ -169,6 +170,54 @@ function selectedStrategy () { return strategies.find(s => s.key === selectedKey
 function pnlCls (n) { return Number(n) > 0 ? 'pos' : (Number(n) < 0 ? 'neg' : ''); }
 function badge (txt, kind) { return `<span class="badge ${esc(kind || '')}">${esc(txt || '--')}</span>`; }
 function exchangeNameFor (provider = 'delta-demo') { return exchanges.find(e => e.provider === provider)?.name || 'Delta Exchange Demo'; }
+const TF_MS = { '5m':300000, '15m':900000, '30m':1800000, '1h':3600000, '4h':14400000 };
+function chartTimeframe () { return selectedStrategy()?.timeframe || $('timeframe')?.value || '5m'; }
+function validCandle (c) {
+  return c && Number.isFinite(Number(c.openTime)) && Number.isFinite(Number(c.open)) &&
+    Number.isFinite(Number(c.high)) && Number.isFinite(Number(c.low)) && Number.isFinite(Number(c.close));
+}
+function sortedCandles (candles = []) {
+  const byTime = new Map();
+  for (const c of candles || []) {
+    if (!validCandle(c)) continue;
+    byTime.set(Number(c.openTime), {
+      ...c,
+      openTime:Number(c.openTime),
+      open:Number(c.open),
+      high:Number(c.high),
+      low:Number(c.low),
+      close:Number(c.close),
+      volume:Number(c.volume) || 0,
+    });
+  }
+  return [...byTime.values()].sort((a, b) => a.openTime - b.openTime);
+}
+function aggregateForChart (candles = []) {
+  const clean = sortedCandles(candles);
+  const tfMs = TF_MS[chartTimeframe()] || TF_MS['5m'];
+  if (tfMs === TF_MS['5m']) return clean;
+  const buckets = new Map();
+  for (const c of clean) {
+    const openTime = Math.floor(c.openTime / tfMs) * tfMs;
+    let bucket = buckets.get(openTime);
+    if (!bucket) {
+      bucket = { openTime, open:c.open, high:c.high, low:c.low, close:c.close, volume:0, closeTime:c.closeTime, isClosed:c.isClosed };
+      buckets.set(openTime, bucket);
+    }
+    bucket.high = Math.max(bucket.high, c.high);
+    bucket.low = Math.min(bucket.low, c.low);
+    bucket.close = c.close;
+    bucket.volume += Number(c.volume) || 0;
+    bucket.closeTime = c.closeTime || bucket.closeTime;
+    bucket.isClosed = c.isClosed;
+  }
+  return [...buckets.values()].sort((a, b) => a.openTime - b.openTime);
+}
+function upsertBaseCandle (c) {
+  if (!validCandle(c)) return;
+  baseCandles = sortedCandles([...baseCandles, c]).slice(-1000);
+  renderCandles(baseCandles, false);
+}
 function options () {
   return {
     timeframe: $('timeframe').value,
@@ -182,6 +231,7 @@ function setOptions (s = {}) {
   $('capital').value = s.capital || 1000;
   $('exchange-enabled').checked = Boolean(s.exchangeEnabled);
   $('exchange-provider').value = s.exchangeProvider || 'delta-demo';
+  if (baseCandles.length) renderCandles(baseCandles, false);
 }
 function addLog (level, msg) {
   const row = document.createElement('div');
@@ -330,8 +380,9 @@ function initChart () {
   candleSeries = priceChart.addCandlestickSeries({ upColor:'#00e676', downColor:'#ff3d57', wickUpColor:'#00e676', wickDownColor:'#ff3d57', borderVisible:false });
 }
 function candleTime (c) { return Math.floor(c.openTime / 1000); }
-function renderCandles (candles = []) {
-  rawCandles = candles.slice(-500);
+function renderCandles (candles = [], updateBase = true) {
+  if (updateBase) baseCandles = sortedCandles(candles).slice(-1000);
+  rawCandles = aggregateForChart(baseCandles).slice(-500);
   if (!candleSeries) return;
   candleSeries.setData(rawCandles.map(c => ({ time:candleTime(c), open:c.open, high:c.high, low:c.low, close:c.close })));
   candleSeries.setMarkers(markerData);
@@ -398,7 +449,7 @@ async function loadInitial () {
 }
 socket.on('ticker', t => { currentPrice = Number(t.price); $('price').textContent = fmtUSD(t.price); });
 socket.on('candles', renderCandles);
-socket.on('candle_tick', c => { if (rawCandles.length) { const next = rawCandles.slice(); if (next[next.length - 1]?.openTime === c.openTime) next[next.length - 1] = c; else next.push(c); renderCandles(next); } });
+socket.on('candle_tick', upsertBaseCandle);
 socket.on('ws_status', s => { $('ws-kline').textContent = s.kline ? 'ON' : 'OFF'; $('ws-kline').className = s.kline ? 'pos' : 'neg'; $('ws-ticker').textContent = s.ticker ? 'ON' : 'OFF'; $('ws-ticker').className = s.ticker ? 'pos' : 'neg'; });
 socket.on('allinone:status', updateHeaderStatus);
 socket.on('allinone:runners', renderStrategies);
@@ -421,6 +472,7 @@ socket.on('disconnect', () => addLog('error', 'Disconnected from server.'));
 window.addEventListener('load', () => {
   initChart();
   updateHeaderStatus();
+  $('timeframe')?.addEventListener('change', () => { if (baseCandles.length) renderCandles(baseCandles, false); });
   loadInitial();
   setInterval(() => loadPositions(false).catch(() => {}), 30000);
   addLog('info', 'All-in-One Strategy Bot page ready.');

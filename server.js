@@ -1213,8 +1213,10 @@ app.get('/api/positions', async (req, res) => {
       runningCount: Object.values(manager.runners).filter(r => r.running).length,
     };
     const exchangeOrders = await ExchangeOrder.find().sort({ createdAt: -1 }).limit(100).lean();
+    const requestedRunner = requestedRunnerId ? manager.getRunner(requestedRunnerId) : null;
+    const useExchangePositions = deltaClient.status().enabled && (!scopeTopLevelToRunner || Boolean(requestedRunner?.executionEnabled));
 
-    if (deltaClient.status().enabled) {
+    if (useExchangePositions) {
       try {
         const deltaSync = await deltaClient.syncAccount({ fromMs: Number.isFinite(fromMs) ? fromMs : 0, toMs: Number.isFinite(toMs) ? toMs : 0, pageSize: 50 });
         latestExchangeSync = {

@@ -19,6 +19,16 @@ const strategyRiskPct = strategy => {
   const pct = Number(strategy?.riskPerTrade) * 100;
   return Number.isFinite(pct) ? pct : 0;
 };
+const moneyLabel = value => {
+  if (value === null || value === undefined || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? `$${n.toFixed(2)}` : '--';
+};
+const qtyLabel = value => {
+  if (value === null || value === undefined || value === '') return '0.000000';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(6) : '0.000000';
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  StrategyRunner — wraps one strategy instance with independent lifecycle
@@ -59,10 +69,9 @@ class StrategyRunner {
     s.removeAllListeners();
 
     s.on('position_opened', async pos => {
-      this.emit('position_opened', pos);
       this.log('info',
-        `🟢 OPENED ${pos.type.toUpperCase()} @ $${pos.entry.toFixed(2)} ` +
-        `| SL $${pos.sl.toFixed(2)} | TP $${pos.tp.toFixed(2)} | ${pos.qty.toFixed(6)} BTC`);
+        `🟢 OPENED ${String(pos.type || '').toUpperCase()} @ ${moneyLabel(pos.entry)} ` +
+        `| SL ${moneyLabel(pos.sl)} | TP ${moneyLabel(pos.tp)} | ${qtyLabel(pos.qty)} BTC`);
       if (this.sessionId) {
         await Position.findOneAndUpdate(
           { sessionId: this.sessionId },
@@ -71,6 +80,7 @@ class StrategyRunner {
         ).catch(() => {});
       }
       this.placeExchangeOrder('open', pos);
+      this.emit('position_opened', pos);
     });
 
     s.on('trade_closed', async trade => {

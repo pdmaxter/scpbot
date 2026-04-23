@@ -121,8 +121,11 @@ const socket = io();
 let state = null;
 let runningState = { running:false, paused:false, warmedUp:false };
 let exchanges = [];
+let baseCandles = [];
 let rawCandles = [];
 let latestStats = {};
+let currentPrice = null;
+let lastPositionsData = null;
 let priceChart = null;
 let candleSeries = null;
 let utStopSeries = null;
@@ -139,6 +142,23 @@ function finiteNumber (value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+function calcOpenPnl (pos, mark = currentPrice) {
+  const entry = finiteNumber(pos?.entry);
+  const qty = finiteNumber(pos?.qty);
+  const markPrice = finiteNumber(mark ?? pos?.markPrice);
+  if (entry === null || qty === null || markPrice === null) return { pnl:finiteNumber(pos?.pnl), pnlPct:finiteNumber(pos?.pnlPct), markPrice };
+  const pnl = pos.type === 'short' ? (entry - markPrice) * qty : (markPrice - entry) * qty;
+  return { pnl, pnlPct:entry && qty ? pnl / (entry * qty) * 100 : null, markPrice };
+}
+function withLiveOpenPnl (pos) {
+  const live = calcOpenPnl(pos);
+  return {
+    ...pos,
+    markPrice:live.markPrice ?? pos.markPrice,
+    pnl:live.pnl ?? pos.pnl,
+    pnlPct:live.pnlPct ?? pos.pnlPct,
+  };
 }
 function chartTime (value) {
   const n = Number(value);
@@ -167,6 +187,35 @@ function normalizeCandles (candles = []) {
   }
   return uniqueSortedByTime(rows.map(row => ({ ...row, time:row.point.time }))).map(({ time, ...row }) => row);
 }
+const TF_MS = { '5m':300000, '15m':900000, '30m':1800000, '1h':3600000, '4h':14400000 };
+function chartTimeframe () { return state?.timeframe || $('timeframe')?.value || '5m'; }
+function aggregateForChart (candles = []) {
+  const rows = normalizeCandles(candles);
+  const tfMs = TF_MS[chartTimeframe()] || TF_MS['5m'];
+  if (tfMs === TF_MS['5m']) return rows;
+  const buckets = new Map();
+  for (const row of rows) {
+    const c = row.raw;
+    const openTime = Math.floor((row.point.time * 1000) / tfMs) * tfMs;
+    let bucket = buckets.get(openTime);
+    if (!bucket) {
+      bucket = { openTime, open:c.open, high:c.high, low:c.low, close:c.close, volume:0, closeTime:c.closeTime, isClosed:c.isClosed };
+      buckets.set(openTime, bucket);
+    }
+    bucket.high = Math.max(bucket.high, c.high);
+    bucket.low = Math.min(bucket.low, c.low);
+    bucket.close = c.close;
+    bucket.volume += Number(c.volume) || 0;
+    bucket.closeTime = c.closeTime || bucket.closeTime;
+    bucket.isClosed = c.isClosed;
+  }
+  return normalizeCandles([...buckets.values()]);
+}
+function upsertBaseCandle (c) {
+  const rows = normalizeCandles([...baseCandles, c]);
+  baseCandles = rows.map(row => row.raw).slice(-1000);
+  renderCandles(baseCandles, false);
+}
 function settings () {
   return {
     timeframe: $('timeframe').value,
@@ -190,6 +239,7 @@ function setSettings (s = {}) {
   $('sell-fee').value = s.sellFeePct || 0;
   $('exchange-enabled').checked = Boolean(s.exchangeEnabled);
   $('exchange-provider').value = s.exchangeProvider || 'delta-demo';
+  if (baseCandles.length) renderCandles(baseCandles, false);
 }
 function addLog (level, msg) {
   const row = document.createElement('div');
@@ -297,8 +347,9 @@ function initChart () {
   candleSeries = priceChart.addCandlestickSeries({ upColor:'#00e676', downColor:'#ff3d57', wickUpColor:'#00e676', wickDownColor:'#ff3d57', borderVisible:false });
   utStopSeries = priceChart.addLineSeries({ color:'#ffd740', lineWidth:2, lineStyle:2, priceLineVisible:false, lastValueVisible:true, title:'UT Trail' });
 }
-function renderCandles (candles = []) {
-  const rows = normalizeCandles(candles).slice(-500);
+function renderCandles (candles = [], updateBase = true) {
+  if (updateBase) baseCandles = normalizeCandles(candles).map(row => row.raw).slice(-1000);
+  const rows = aggregateForChart(baseCandles).slice(-500);
   rawCandles = rows.map(row => row.raw);
   if (!candleSeries) return;
   candleSeries.setData(rows.map(row => row.point));
@@ -324,27 +375,32 @@ function updateChartState () {
   $('chart-title').textContent = `UT Bot Alerts / ${state?.timeframe || '5m'}`;
   $('chart-run-state').textContent = runningState.running ? (runningState.warmedUp ? 'Live' : 'Warming') : 'Stopped';
   const pos = latestStats.position;
-  $('chart-pos-state').innerHTML = pos ? `<span class="${pos.type === 'long' ? 'pos' : 'neg'}">${String(pos.type).toUpperCase()}</span> @ ${fmtUSD(pos.entry)}` : 'Flat';
-  const pnl = Number(latestStats.totalPnl || 0);
-  $('chart-pnl-state').innerHTML = `P&L <span class="${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</span>`;
+  const live = pos ? calcOpenPnl(pos) : { pnl:0, markPrice:null };
+  $('chart-pos-state').innerHTML = pos ? `<span class="${pos.type === 'long' ? 'pos' : 'neg'}">${String(pos.type).toUpperCase()}</span> @ ${fmtUSD(pos.entry)}${live.markPrice !== null ? ` / Mark ${fmtUSD(live.markPrice)}` : ''}` : 'Flat';
+  const pnl = Number(latestStats.totalPnl || 0) + Number(live.pnl || 0);
+  $('chart-pnl-state').innerHTML = `Live P&L <span class="${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</span>`;
   renderChartPosition(pos);
 }
 function setPnlMetric (id, value) { const el = $(id); el.className = `metric-value ${pnlCls(value)}`; el.textContent = fmtUSD(value); }
 function renderPositions (data = {}) {
+  lastPositionsData = data;
+  const openRows = (data.open || []).map(withLiveOpenPnl);
+  const closed = data.closed || [];
+  const openPnl = openRows.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0);
+  const closedPnl = closed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
   const summary = data.summary || {};
-  $('pos-open-count').textContent = summary.openCount ?? 0;
-  $('pos-closed-count').textContent = summary.closedCount ?? 0;
-  setPnlMetric('pos-open-pnl', summary.openPnl || 0);
-  setPnlMetric('pos-closed-pnl', summary.closedPnl || 0);
-  setPnlMetric('pos-net-pnl', summary.netPnl || 0);
+  $('pos-open-count').textContent = openRows.length || summary.openCount || 0;
+  $('pos-closed-count').textContent = closed.length || summary.closedCount || 0;
+  setPnlMetric('pos-open-pnl', openPnl);
+  setPnlMetric('pos-closed-pnl', closedPnl);
+  setPnlMetric('pos-net-pnl', openPnl + closedPnl);
   const delta = data.delta || {};
   $('positions-delta-pill').textContent = delta.enabled ? `DELTA ON ${delta.productSymbol || ''}` : 'DELTA OFF';
   $('positions-delta-pill').className = `pill ${delta.enabled && !delta.lastError ? 'pos' : 'neg'}`;
   const running = Number(data.botStatus?.runningCount || 0);
   $('positions-bot-pill').textContent = running ? `BOTS ${running} LIVE` : 'BOTS STOPPED';
   $('positions-updated-at').textContent = `${data.source === 'delta' ? 'Exchange synced' : 'Local data'} ${new Date().toLocaleTimeString()}`;
-  $('positions-open-body').innerHTML = (data.open || []).length ? data.open.map(p => `<tr><td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td><td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${Number(p.size || p.qty || 0).toFixed(0)}</td><td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td><td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="10" class="muted">No open positions.</td></tr>';
-  const closed = data.closed || [];
+  $('positions-open-body').innerHTML = openRows.length ? openRows.map(p => `<tr><td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td><td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${Number(p.size || p.qty || 0).toFixed(0)}</td><td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td><td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="10" class="muted">No open positions.</td></tr>';
   $('positions-closed-sub').textContent = `${closed.length} closed`;
   $('positions-closed-body').innerHTML = closed.length ? closed.map(t => `<tr><td>${badge('closed','closed')}</td><td>${esc(t.strategyName || '--')}</td><td>${badge(t.type,t.type)}</td><td>${fmtUSD(t.entry)}</td><td>${fmtUSD(t.exit)}</td><td>${Number(t.size || t.qty || 0).toFixed(0)}</td><td class="${pnlCls(t.pnl)}">${fmtUSD(t.pnl)}</td><td class="${pnlCls(t.pnlPct)}">${fmtPct(t.pnlPct)}</td><td>${esc(t.reason || '--')}</td><td>${fmtTime(t.exitTime)}</td><td>${esc(t.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="11" class="muted">No closed positions.</td></tr>';
   const orders = data.exchangeOrders || [];
@@ -358,9 +414,14 @@ async function loadInitial () {
   if (Array.isArray(candles)) renderCandles(candles);
   await loadPositions(false).catch(err => addLog('error', `Positions load failed: ${err.message}`));
 }
-socket.on('ticker', t => { $('price').textContent = fmtUSD(t.price); });
+socket.on('ticker', t => {
+  currentPrice = Number(t.price);
+  $('price').textContent = fmtUSD(t.price);
+  updateChartState();
+  if (lastPositionsData) renderPositions(lastPositionsData);
+});
 socket.on('candles', renderCandles);
-socket.on('candle_tick', c => { if (rawCandles.length) { const next = rawCandles.slice(); if (next[next.length - 1]?.openTime === c.openTime) next[next.length - 1] = c; else next.push(c); renderCandles(next); } });
+socket.on('candle_tick', upsertBaseCandle);
 socket.on('ws_status', s => { $('ws-kline').textContent = s.kline ? 'ON' : 'OFF'; $('ws-kline').className = s.kline ? 'pos' : 'neg'; $('ws-ticker').textContent = s.ticker ? 'ON' : 'OFF'; $('ws-ticker').className = s.ticker ? 'pos' : 'neg'; });
 socket.on('utbot:status', updateStatus);
 socket.on('utbot:state', applyState);
@@ -368,7 +429,7 @@ socket.on('utbot:runner_event', payload => {
   if (payload.status) updateStatus(payload.status);
   if (payload.stats) applyStats(payload.stats);
   if (payload.event === 'session_info') applySessionInfo(payload.data);
-  if (payload.event === 'position_opened') addLog('success', `UT Bot opened ${payload.data?.type || ''}.`);
+  if (payload.event === 'position_opened') { addLog('success', `UT Bot opened ${payload.data?.type || ''}.`); loadPositions(true).catch(() => {}); }
   if (payload.event === 'trade_closed') { addLog(payload.data?.pnl >= 0 ? 'success' : 'warn', `UT Bot closed ${fmtUSD(payload.data?.pnl)}.`); loadPositions(true).catch(() => {}); }
 });
 socket.on('exchange:sync', () => loadPositions(false).catch(() => {}));
@@ -378,6 +439,7 @@ socket.on('disconnect', () => addLog('error', 'Disconnected from server.'));
 window.addEventListener('load', () => {
   initChart();
   updateStatus();
+  $('timeframe')?.addEventListener('change', () => { if (baseCandles.length) renderCandles(baseCandles, false); });
   loadInitial();
   setInterval(() => loadPositions(false).catch(() => {}), 30000);
   addLog('info', 'UT Bot Alerts page ready.');
