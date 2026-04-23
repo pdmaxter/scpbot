@@ -4,12 +4,12 @@ require('dotenv').config();
 const express    = require('express');
 const http       = require('http');
 const https      = require('https');
+const crypto     = require('crypto');
 const { Server } = require('socket.io');
 const path       = require('path');
-const crypto     = require('crypto');
 
 const db                                      = require('./db');
-const { Session, PineScriptConfig, AllInOneStrategyConfig, UTBotConfig, Trade, Position, ExchangeOrder, ExchangeCredential } = db;
+const { Session, PineScriptConfig, AllInOneStrategyConfig, UTBotConfig, Trade, Position, DailyPnl, Equity } = db;
 const { BotManager, StrategyRunner }         = require('./bot-manager');
 const { ScalpingStrategy }                   = require('./strategies/scalping');
 const { RangeBreakoutStrategy }              = require('./strategies/breakout');
@@ -17,14 +17,10 @@ const { HeikenAshiSupertrendStrategy }       = require('./strategies/heikenashi_
 const { PineScriptStrategy }                 = require('./strategies/pine_adapter');
 const { AllInOneStrategy, ALL_IN_ONE_DEFINITIONS, TIMEFRAME_MS } = require('./strategies/all_in_one');
 const { UTBotStrategy }                      = require('./strategies/ut_bot');
-const { DeltaDemoClient }                    = require('./delta-exchange');
 
 const SYMBOL_REST = 'BTCUSDT';
 const INTERVAL_REST = '5m';
 const CANDLE_MS = 5 * 60 * 1000;
-const EXCHANGE_PROVIDERS = [
-  { provider: 'delta-demo', name: 'Delta Exchange Demo' },
-];
 const ALL_IN_ONE_AUTO_RISK = {
   riskPerTradePct: 1,
   atrLength: 14,
@@ -192,21 +188,14 @@ io.use((socket, next) => {
 //  BotManager + runners
 // ─────────────────────────────────────────────────────────────────────────────
 const manager = new BotManager(io);
-const deltaClient = new DeltaDemoClient(process.env);
-
-const scalpRunner    = new StrategyRunner('scalping',    new ScalpingStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { executionAdapter: deltaClient, displayName: 'EMA Scalping', onExchangeOrder: queueExchangeOrderSync });
-const breakoutRunner = new StrategyRunner('breakout',    new RangeBreakoutStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { executionAdapter: deltaClient, displayName: 'Range Breakout', onExchangeOrder: queueExchangeOrderSync });
-const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertrendStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { executionAdapter: deltaClient, displayName: 'Heikin-Ashi SuperTrend', onExchangeOrder: queueExchangeOrderSync });
+const scalpRunner    = new StrategyRunner('scalping',    new ScalpingStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { displayName: 'EMA Scalping' });
+const breakoutRunner = new StrategyRunner('breakout',    new RangeBreakoutStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { displayName: 'Range Breakout' });
+const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertrendStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { displayName: 'Heikin-Ashi SuperTrend' });
 const pineRunners    = new Map(); // scriptId -> StrategyRunner
 const allInOneRunners = new Map(); // strategyKey -> StrategyRunner
 let utBotRunner = null;
-const EXCHANGE_SYNC_INTERVAL_MS = 30 * 1000;
 const STRATEGY_WATCHDOG_INTERVAL_MS = 30 * 1000;
-let exchangeSyncTimer = null;
-let exchangeSyncInFlight = false;
-let latestExchangeSync = null;
 let strategyWatchdogTimer = null;
-let exchangeOrderSyncTimer = null;
 
 manager.addRunner(scalpRunner);
 manager.addRunner(breakoutRunner);
@@ -230,7 +219,6 @@ async function startRunner (runner, opts = {}) {
   const sessInfo = await runner.buildSessionInfo().catch(() => null);
   if (sessInfo) io.emit(`${runner.id}:session_info`, sessInfo);
   await manager.sendSessionsList(io);
-  startBackendExchangeSync();
 }
 
 function fetchJson (url) {
@@ -325,8 +313,6 @@ function pineListItem (doc) {
     positionSizePct: doc.positionSizePct ?? 10,
     minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
     profitRatioBooking: doc.profitRatioBooking ?? 1.67,
-    exchangeEnabled: Boolean(doc.exchangeEnabled),
-    exchangeProvider: doc.exchangeProvider || 'delta-demo',
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -412,7 +398,7 @@ function ensurePineRunner (doc) {
         profitRatioBooking: doc.profitRatioBooking ?? 1.67,
       }),
       io,
-      { sessionStrategyType: 'pine', pineScriptId: scriptId, displayName: doc.name, executionAdapter: deltaClient, executionEnabled: Boolean(doc.exchangeEnabled), lotSize: doc.lotSize || 1, onExchangeOrder: queueExchangeOrderSync }
+      { sessionStrategyType: 'pine', pineScriptId: scriptId, displayName: doc.name, lotSize: doc.lotSize || 1 }
     );
     pineRunners.set(scriptId, runner);
     manager.addRunner(runner);
@@ -420,7 +406,6 @@ function ensurePineRunner (doc) {
     runner.wire();
   } else {
     runner.displayName = doc.name;
-    runner.executionEnabled = Boolean(doc.exchangeEnabled);
     runner.lotSize = doc.lotSize || 1;
     if (!runner.running) runner.strategy.setScript({ name: doc.name, code: doc.code });
     runner.wire();
@@ -443,8 +428,6 @@ async function setActivePineScript (doc) {
     positionSizePct: doc.positionSizePct ?? 10,
     minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
     profitRatioBooking: doc.profitRatioBooking ?? 1.67,
-    exchangeEnabled: Boolean(doc.exchangeEnabled),
-    exchangeProvider: doc.exchangeProvider || 'delta-demo',
   });
   await emitPineState();
   return runner;
@@ -463,12 +446,6 @@ function applyPineRuntimeOptions (doc, body = {}) {
   if (body.positionSizePct !== undefined) doc.positionSizePct = Math.max(0, +body.positionSizePct || 0);
   if (body.minProfitBookingPct !== undefined) doc.minProfitBookingPct = Math.max(0, +body.minProfitBookingPct || 0);
   if (body.profitRatioBooking !== undefined) doc.profitRatioBooking = Math.max(0.1, +body.profitRatioBooking || 1.67);
-  if (body.exchangeEnabled !== undefined) doc.exchangeEnabled = Boolean(body.exchangeEnabled);
-  if (body.exchangeProvider !== undefined && providerMeta(String(body.exchangeProvider))) {
-    doc.exchangeProvider = String(body.exchangeProvider);
-  } else if (!doc.exchangeProvider) {
-    doc.exchangeProvider = 'delta-demo';
-  }
 }
 
 function pineStrategyOptions (doc) {
@@ -493,8 +470,6 @@ function allInOneDefaultConfig (def) {
     timeframe: '5m',
     capital: 1000,
     ...ALL_IN_ONE_AUTO_RISK,
-    exchangeEnabled: false,
-    exchangeProvider: 'delta-demo',
     isActive: false,
   };
 }
@@ -522,8 +497,6 @@ function allInOneListItem (doc) {
     slMultiplier: doc.slMultiplier || 2,
     tpMultiplier: doc.tpMultiplier || 4,
     trailOffset: doc.trailOffset || 1.5,
-    exchangeEnabled: Boolean(doc.exchangeEnabled),
-    exchangeProvider: doc.exchangeProvider || 'delta-demo',
     isActive: Boolean(doc.isActive),
     updatedAt: doc.updatedAt,
   };
@@ -542,9 +515,6 @@ function applyAllInOneRuntimeOptions (doc, body = {}) {
   if (body.timeframe !== undefined && TIMEFRAME_MS[String(body.timeframe)]) doc.timeframe = String(body.timeframe);
   if (body.capital !== undefined) doc.capital = Math.max(100, Number(body.capital) || doc.capital || 1000);
   Object.assign(doc, ALL_IN_ONE_AUTO_RISK);
-  if (body.exchangeEnabled !== undefined) doc.exchangeEnabled = Boolean(body.exchangeEnabled);
-  if (body.exchangeProvider !== undefined && providerMeta(String(body.exchangeProvider))) doc.exchangeProvider = String(body.exchangeProvider);
-  if (!doc.exchangeProvider) doc.exchangeProvider = 'delta-demo';
 }
 
 function allInOneAggregateStatus () {
@@ -586,8 +556,6 @@ function commonAllInOneSettings (doc) {
   return {
     timeframe: doc?.timeframe || '5m',
     capital: doc?.capital || 1000,
-    exchangeEnabled: Boolean(doc?.exchangeEnabled),
-    exchangeProvider: doc?.exchangeProvider || 'delta-demo',
     autoRisk: ALL_IN_ONE_AUTO_RISK,
   };
 }
@@ -597,13 +565,10 @@ async function saveCommonAllInOneSettings (body = {}) {
   const patch = {
     timeframe: TIMEFRAME_MS[String(body.timeframe)] ? String(body.timeframe) : '5m',
     capital: Math.max(100, Number(body.capital) || 1000),
-    exchangeEnabled: Boolean(body.exchangeEnabled),
-    exchangeProvider: providerMeta(String(body.exchangeProvider)) ? String(body.exchangeProvider) : 'delta-demo',
     ...ALL_IN_ONE_AUTO_RISK,
   };
   await AllInOneStrategyConfig.updateMany({}, { $set: patch });
   for (const runner of allInOneRunners.values()) {
-    runner.executionEnabled = Boolean(patch.exchangeEnabled);
     if (!runner.running) {
       runner.strategy.reset({
         strategyKey: runner.strategy.strategyKey,
@@ -633,8 +598,6 @@ function utBotDefaultConfig () {
     useHeikinAshi: false,
     buyFeePct: 0,
     sellFeePct: 0,
-    exchangeEnabled: false,
-    exchangeProvider: 'delta-demo',
     isActive: false,
   };
 }
@@ -658,9 +621,6 @@ function applyUTBotRuntimeOptions (doc, body = {}) {
   if (body.useHeikinAshi !== undefined) doc.useHeikinAshi = Boolean(body.useHeikinAshi);
   if (body.buyFeePct !== undefined) doc.buyFeePct = Math.max(0, Number(body.buyFeePct) || 0);
   if (body.sellFeePct !== undefined) doc.sellFeePct = Math.max(0, Number(body.sellFeePct) || 0);
-  if (body.exchangeEnabled !== undefined) doc.exchangeEnabled = Boolean(body.exchangeEnabled);
-  if (body.exchangeProvider !== undefined && providerMeta(String(body.exchangeProvider))) doc.exchangeProvider = String(body.exchangeProvider);
-  if (!doc.exchangeProvider) doc.exchangeProvider = 'delta-demo';
 }
 
 function utBotStrategyOptions (doc) {
@@ -686,8 +646,6 @@ function utBotConfigView (doc) {
     useHeikinAshi: Boolean(doc.useHeikinAshi),
     buyFeePct: doc.buyFeePct || 0,
     sellFeePct: doc.sellFeePct || 0,
-    exchangeEnabled: Boolean(doc.exchangeEnabled),
-    exchangeProvider: doc.exchangeProvider || 'delta-demo',
     isActive: Boolean(doc.isActive),
     updatedAt: doc.updatedAt,
   };
@@ -722,6 +680,43 @@ async function emitUTBotState () {
   io.emit('all_status', manager.allStatus());
 }
 
+async function resetRunnerToConfiguredState (runner) {
+  if (!runner) return;
+  if (runner.id === 'scalping' || runner.id === 'breakout' || runner.id === 'heikenashi') {
+    await runner.reset({
+      capital: runner.strategy.initialCapital || 10000,
+      riskPerTradePct: Math.max(0.1, Number(runner.strategy.riskPerTrade || 0.02) * 100),
+    });
+    return;
+  }
+  if (runner.id.startsWith('pine:')) {
+    const doc = runner.pineScriptId ? await PineScriptConfig.findById(runner.pineScriptId) : null;
+    await runner.reset(doc ? pineStrategyOptions(doc) : {
+      capital: runner.strategy.initialCapital || 10000,
+      riskPerTradePct: Math.max(0.1, Number(runner.strategy.riskPerTrade || 0.02) * 100),
+      lotSize: runner.strategy.lotSize || 1,
+      positionSizePct: Number(runner.strategy.positionSizePct || 0) * 100,
+      minProfitBookingPct: Number(runner.strategy.minProfitBookingPct || 0.005) * 100,
+      profitRatioBooking: runner.strategy.profitRatioBooking || 1.67,
+    });
+    return;
+  }
+  if (runner.id.startsWith('allinone:')) {
+    const key = String(runner.id).split(':')[1];
+    const doc = key ? await AllInOneStrategyConfig.findOne({ key }) : null;
+    await runner.reset(doc ? allInOneStrategyOptions(doc) : {
+      strategyKey: key,
+      timeframe: runner.strategy.timeframe || '5m',
+      capital: runner.strategy.initialCapital || 1000,
+    });
+    return;
+  }
+  if (runner.id === 'utbot') {
+    const doc = await ensureUTBotConfig();
+    await runner.reset(utBotStrategyOptions(doc));
+  }
+}
+
 function hookUTBotRunnerEvents (runner) {
   if (runner._utBotHooked) return;
   runner._utBotHooked = true;
@@ -750,16 +745,12 @@ function ensureUTBotRunner (doc) {
       {
         sessionStrategyType: 'utbot',
         displayName: 'UT Bot Alerts',
-        executionAdapter: deltaClient,
-        executionEnabled: Boolean(doc.exchangeEnabled),
-        onExchangeOrder: queueExchangeOrderSync,
       }
     );
     manager.addRunner(utBotRunner);
     hookUTBotRunnerEvents(utBotRunner);
     utBotRunner.wire();
   } else {
-    utBotRunner.executionEnabled = Boolean(doc.exchangeEnabled);
     utBotRunner.displayName = 'UT Bot Alerts';
     if (!utBotRunner.running) utBotRunner.strategy.reset(utBotStrategyOptions(doc));
     utBotRunner.wire();
@@ -798,9 +789,6 @@ function ensureAllInOneRunner (doc) {
       {
         sessionStrategyType: allInOneRunnerId(key),
         displayName: doc.name,
-        executionAdapter: deltaClient,
-        executionEnabled: Boolean(doc.exchangeEnabled),
-        onExchangeOrder: queueExchangeOrderSync,
       }
     );
     allInOneRunners.set(key, runner);
@@ -809,7 +797,6 @@ function ensureAllInOneRunner (doc) {
     runner.wire();
   } else {
     runner.displayName = doc.name;
-    runner.executionEnabled = Boolean(doc.exchangeEnabled);
     if (!runner.running) runner.strategy.reset(allInOneStrategyOptions(doc));
     runner.wire();
   }
@@ -826,80 +813,6 @@ const STRATEGY_LABELS = {
 
 function idString (value) {
   return value?.toString?.() || (value ? String(value) : null);
-}
-
-function exchangeSecretKey () {
-  return crypto
-    .createHash('sha256')
-    .update(process.env.EXCHANGE_KEY_SECRET || DASHBOARD_PWD || process.env.MONGO_URI || 'scpbot-local-key')
-    .digest();
-}
-
-function encryptExchangeSecret (value) {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', exchangeSecretKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return [iv.toString('base64'), tag.toString('base64'), encrypted.toString('base64')].join(':');
-}
-
-function decryptExchangeSecret (payload) {
-  if (!payload) return '';
-  try {
-    const [ivRaw, tagRaw, encryptedRaw] = String(payload).split(':');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', exchangeSecretKey(), Buffer.from(ivRaw, 'base64'));
-    decipher.setAuthTag(Buffer.from(tagRaw, 'base64'));
-    return Buffer.concat([
-      decipher.update(Buffer.from(encryptedRaw, 'base64')),
-      decipher.final(),
-    ]).toString('utf8');
-  } catch (e) {
-    return '';
-  }
-}
-
-function maskSecret (value) {
-  const text = String(value || '');
-  if (!text) return '';
-  if (text.length <= 8) return `${text.slice(0, 2)}****${text.slice(-2)}`;
-  return `${text.slice(0, 4)}****${text.slice(-4)}`;
-}
-
-function providerMeta (provider) {
-  return EXCHANGE_PROVIDERS.find(p => p.provider === provider) || null;
-}
-
-function exchangeCredentialView (doc, status) {
-  const apiKey = decryptExchangeSecret(doc?.apiKeyEncrypted);
-  return {
-    provider: doc?.provider || status?.provider || 'delta-demo',
-    name: providerMeta(doc?.provider || status?.provider)?.name || 'Delta Exchange Demo',
-    enabled: Boolean(doc?.enabled ?? status?.enabled),
-    configured: Boolean(apiKey && doc?.apiSecretEncrypted) || Boolean(status?.configured),
-    credentialSource: doc ? 'database' : (status?.credentialSource || 'env'),
-    maskedApiKey: apiKey ? maskSecret(apiKey) : '',
-    baseUrl: doc?.baseUrl || status?.baseUrl || '',
-    productSymbol: doc?.productSymbol || status?.productSymbol || 'BTCUSD',
-    productId: doc?.productId || status?.productId || null,
-    lastError: status?.lastError || null,
-    configuredAt: doc?.configuredAt || doc?.updatedAt || null,
-  };
-}
-
-async function applySavedExchangeCredentials () {
-  const doc = await ExchangeCredential.findOne({ provider: 'delta-demo' }).lean().catch(() => null);
-  if (!doc) return;
-  deltaClient.configure({
-    apiKey: decryptExchangeSecret(doc.apiKeyEncrypted),
-    apiSecret: decryptExchangeSecret(doc.apiSecretEncrypted),
-    baseUrl: doc.baseUrl,
-    productSymbol: doc.productSymbol,
-    productId: doc.productId,
-    enabled: doc.enabled,
-    credentialSource: 'database',
-  });
 }
 
 function strategyNameForSession (session, pineMap) {
@@ -933,89 +846,14 @@ function calcUnrealizedPnl (position, markPrice) {
   };
 }
 
-async function runBackendExchangeSync (reason = 'timer') {
-  if (!deltaClient.status().enabled || exchangeSyncInFlight) return latestExchangeSync;
-  exchangeSyncInFlight = true;
-  try {
-    const sync = await deltaClient.syncAccount({ pageSize: 50 });
-    latestExchangeSync = {
-      ...sync,
-      reason,
-      runningBots: Object.values(manager.runners).filter(r => r.running).length,
-    };
-    io.emit('exchange:sync', {
-      provider: latestExchangeSync.provider,
-      productSymbol: latestExchangeSync.product?.symbol || deltaClient.status().productSymbol,
-      syncedAt: latestExchangeSync.syncedAt,
-      openCount: latestExchangeSync.summary?.openCount || 0,
-      closedCount: latestExchangeSync.summary?.closedCount || 0,
-      openPnl: latestExchangeSync.summary?.openPnl || 0,
-      closedPnl: latestExchangeSync.summary?.closedPnl || 0,
-      netPnl: latestExchangeSync.summary?.netPnl || 0,
-      errors: latestExchangeSync.errors || [],
-      reason,
-    });
-    return latestExchangeSync;
-  } catch (err) {
-    deltaClient.lastError = err.message;
-    latestExchangeSync = {
-      provider: 'delta-demo',
-      syncedAt: new Date().toISOString(),
-      reason,
-      errors: [err.message],
-      summary: { openCount: 0, closedCount: 0, openPnl: 0, closedPnl: 0, netPnl: 0 },
-    };
-    io.emit('exchange:sync', latestExchangeSync);
-    console.error('[DELTA] Background sync failed:', err.message);
-    return latestExchangeSync;
-  } finally {
-    exchangeSyncInFlight = false;
-  }
-}
-
-function startBackendExchangeSync () {
-  if (exchangeSyncTimer || !deltaClient.status().enabled) return;
-  runBackendExchangeSync('boot').catch(() => {});
-  exchangeSyncTimer = setInterval(() => {
-    runBackendExchangeSync('timer').catch(() => {});
-  }, EXCHANGE_SYNC_INTERVAL_MS);
-}
-
-function queueExchangeOrderSync () {
-  if (!deltaClient.status().enabled) return;
-  if (exchangeOrderSyncTimer) clearTimeout(exchangeOrderSyncTimer);
-  exchangeOrderSyncTimer = setTimeout(() => {
-    exchangeOrderSyncTimer = null;
-    runBackendExchangeSync('order').catch(() => {});
-  }, 1500);
-}
-
 function startStrategyWatchdog () {
   if (strategyWatchdogTimer) return;
   strategyWatchdogTimer = setInterval(() => {
     const runningCount = Object.values(manager.runners).filter(r => r.running).length;
     if (!runningCount) return;
     manager.ensureWs();
-    startBackendExchangeSync();
     io.emit('all_status', manager.allStatus());
   }, STRATEGY_WATCHDOG_INTERVAL_MS);
-}
-
-function backendExchangeSyncStatus () {
-  return {
-    enabled: Boolean(exchangeSyncTimer && deltaClient.status().enabled),
-    inFlight: exchangeSyncInFlight,
-    intervalMs: EXCHANGE_SYNC_INTERVAL_MS,
-    latest: latestExchangeSync
-      ? {
-          syncedAt: latestExchangeSync.syncedAt,
-          reason: latestExchangeSync.reason,
-          runningBots: latestExchangeSync.runningBots || 0,
-          summary: latestExchangeSync.summary || null,
-          errors: latestExchangeSync.errors || [],
-        }
-      : null,
-  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1098,78 +936,6 @@ app.get('/api/strategy/:id/stats', (req, res) => {
   res.json(runner.strategy.getFullState());
 });
 
-app.get('/api/delta/status', (_req, res) => {
-  res.json({ ...deltaClient.status(), backendSync: backendExchangeSyncStatus() });
-});
-
-app.get('/api/exchanges', async (_req, res) => {
-  try {
-    const docs = await ExchangeCredential.find().lean();
-    const docMap = new Map(docs.map(doc => [doc.provider, doc]));
-    res.json({
-      exchanges: EXCHANGE_PROVIDERS.map(meta => exchangeCredentialView(
-        docMap.get(meta.provider),
-        meta.provider === 'delta-demo' ? deltaClient.status() : { provider: meta.provider, enabled: false, configured: false }
-      )),
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/exchanges/:provider', async (req, res) => {
-  try {
-    const provider = String(req.params.provider || '').trim();
-    const meta = providerMeta(provider);
-    if (!meta) return res.status(400).json({ error: 'Unsupported exchange provider' });
-
-    const existing = await ExchangeCredential.findOne({ provider }).lean();
-    const body = req.body || {};
-    const apiKeyInput = String(body.apiKey || '').trim();
-    const apiSecretInput = String(body.apiSecret || '').trim();
-    const apiKey = apiKeyInput || decryptExchangeSecret(existing?.apiKeyEncrypted);
-    const apiSecret = apiSecretInput || decryptExchangeSecret(existing?.apiSecretEncrypted);
-    const enabled = Boolean(body.enabled);
-    if (enabled && (!apiKey || !apiSecret)) {
-      return res.status(400).json({ error: 'API key and API secret are required before enabling this exchange' });
-    }
-
-    let baseUrl = String(body.baseUrl || existing?.baseUrl || deltaClient.status().baseUrl || '').trim();
-    if (baseUrl) {
-      try { baseUrl = new URL(baseUrl).toString().replace(/\/$/, ''); }
-      catch (e) { return res.status(400).json({ error: 'Exchange base URL is invalid' }); }
-    }
-    const productSymbol = String(body.productSymbol || existing?.productSymbol || deltaClient.status().productSymbol || 'BTCUSD').trim().toUpperCase();
-    const rawProductId = body.productId !== undefined
-      ? String(body.productId).trim()
-      : (existing?.productId || deltaClient.status().productId || '');
-    const productIdValue = rawProductId ? Number(rawProductId) : null;
-    if (rawProductId && (!Number.isFinite(productIdValue) || productIdValue <= 0)) {
-      return res.status(400).json({ error: 'Product ID must be a positive number' });
-    }
-    const productId = productIdValue ? Math.round(productIdValue) : null;
-
-    const doc = await ExchangeCredential.findOneAndUpdate(
-      { provider },
-      {
-        provider,
-        name: meta.name,
-        enabled,
-        apiKeyEncrypted: encryptExchangeSecret(apiKey),
-        apiSecretEncrypted: encryptExchangeSecret(apiSecret),
-        baseUrl,
-        productSymbol,
-        productId,
-        credentialSource: 'database',
-        configuredAt: new Date(),
-      },
-      { upsert: true, new: true }
-    ).lean();
-
-    await applySavedExchangeCredentials();
-    startBackendExchangeSync();
-    res.json({ ok: true, exchange: exchangeCredentialView(doc, deltaClient.status()) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 app.get('/api/positions', async (req, res) => {
   try {
     const requestedPineId = req.query.pineScriptId ? String(req.query.pineScriptId) : null;
@@ -1212,108 +978,6 @@ app.get('/api/positions', async (req, res) => {
       pine: pineAggregateStatus(),
       runningCount: Object.values(manager.runners).filter(r => r.running).length,
     };
-    const exchangeOrders = await ExchangeOrder.find().sort({ createdAt: -1 }).limit(100).lean();
-    const requestedRunner = requestedRunnerId ? manager.getRunner(requestedRunnerId) : null;
-    const useExchangePositions = deltaClient.status().enabled && (!scopeTopLevelToRunner || Boolean(requestedRunner?.executionEnabled));
-
-    if (useExchangePositions) {
-      try {
-        const deltaSync = await deltaClient.syncAccount({ fromMs: Number.isFinite(fromMs) ? fromMs : 0, toMs: Number.isFinite(toMs) ? toMs : 0, pageSize: 50 });
-        latestExchangeSync = {
-          ...deltaSync,
-          reason: req.query.force === '1' ? 'force' : 'api',
-          runningBots: botStatus.runningCount,
-        };
-        const auditByOrder = new Map();
-        const auditByClient = new Map();
-        for (const order of exchangeOrders) {
-          const orderId = order.response?.result?.id || order.response?.id;
-          if (orderId) auditByOrder.set(String(orderId), order);
-          if (order.clientOrderId) auditByClient.set(String(order.clientOrderId), order);
-        }
-        const auditForFill = fill => auditByOrder.get(String(fill?.order_id || '')) || auditByClient.get(String(fill?.client_order_id || '')) || null;
-        const lastOpenAudit = exchangeOrders.find(o => o.action === 'open' && o.status === 'sent');
-        const selectedOpenAudit = requestedRunnerId
-          ? exchangeOrders.find(o => o.action === 'open' && o.status === 'sent' && o.runnerId === requestedRunnerId)
-          : null;
-        const defaultOpenAudit = requestedRunnerId ? selectedOpenAudit : lastOpenAudit;
-        const enrichTrade = trade => {
-          const audit = auditForFill(trade.exchange?.openFill) || auditForFill(trade.exchange?.closeFill);
-          return {
-            ...trade,
-            strategyName: audit?.strategyName || trade.strategyName,
-            strategyType: audit?.strategyType || trade.strategyType,
-            runnerId: audit?.runnerId || trade.runnerId,
-            shortId: idString(audit?.sessionId)?.slice(-6).toUpperCase() || null,
-          };
-        };
-        const open = deltaSync.positions.map(p => ({
-          ...p,
-          strategyName: defaultOpenAudit?.strategyName || p.strategyName,
-          strategyType: defaultOpenAudit?.strategyType || p.strategyType,
-          runnerId: defaultOpenAudit?.runnerId || p.runnerId,
-          pineScriptId: idString(defaultOpenAudit?.pineScriptId) || null,
-          shortId: idString(defaultOpenAudit?.sessionId)?.slice(-6).toUpperCase() || null,
-          markPrice: p.markPrice || markPrice,
-        }));
-        const closed = deltaSync.trades.map(enrichTrade);
-        const selectedClosed = requestedRunnerId ? closed.filter(t => t.runnerId === requestedRunnerId) : closed;
-        const selectedOpen = requestedRunnerId ? open.filter(p => p.runnerId === requestedRunnerId) : open;
-        const visibleOpen = scopeTopLevelToRunner ? selectedOpen : open;
-        const visibleClosed = scopeTopLevelToRunner ? selectedClosed : closed;
-        const visibleExchangeOrders = scopeTopLevelToRunner ? exchangeOrders.filter(o => o.runnerId === requestedRunnerId) : exchangeOrders;
-        const selectedOpenPnl = selectedOpen.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0);
-        const selectedClosedPnl = selectedClosed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
-        const visibleOpenPnl = visibleOpen.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0);
-        const visibleClosedPnl = visibleClosed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
-        return res.json({
-          markPrice,
-          summary: {
-            openCount: visibleOpen.length,
-            closedCount: visibleClosed.length,
-            openPnl: visibleOpenPnl,
-            closedPnl: visibleClosedPnl,
-            netPnl: visibleOpenPnl + visibleClosedPnl,
-          },
-          source: 'delta',
-          selected: requestedRunnerId ? {
-            runnerId: requestedRunnerId,
-            pineScriptId: requestedPineId,
-            open: selectedOpen,
-            closed: selectedClosed,
-            summary: {
-              openCount: selectedOpen.length,
-              closedCount: selectedClosed.length,
-              openPnl: selectedOpenPnl,
-              closedPnl: selectedClosedPnl,
-              netPnl: selectedOpenPnl + selectedClosedPnl,
-            },
-          } : null,
-          botStatus,
-          delta: { ...deltaClient.status(), lastSyncAt: deltaSync.syncedAt, syncErrors: deltaSync.errors, backendSync: backendExchangeSyncStatus() },
-          open: visibleOpen,
-          closed: visibleClosed,
-          exchangeOrders: visibleExchangeOrders.map(o => ({
-            id: idString(o._id),
-            provider: o.provider,
-            action: o.action,
-            status: o.status,
-            runnerId: o.runnerId,
-            strategyType: o.strategyType,
-            strategyName: o.strategyName,
-            positionType: o.positionType,
-            side: o.side,
-            productSymbol: o.productSymbol,
-            size: o.size,
-            requestedQty: o.requestedQty,
-            error: o.error,
-            createdAt: o.createdAt,
-          })),
-        });
-      } catch (syncError) {
-        deltaClient.lastError = syncError.message;
-      }
-    }
 
     const open = openDocs.map(p => {
       const session = sessionMap.get(idString(p.sessionId));
@@ -1371,7 +1035,6 @@ app.get('/api/positions', async (req, res) => {
     const selectedClosed = requestedRunnerId ? closed.filter(t => t.runnerId === requestedRunnerId) : closed;
     const visibleOpen = scopeTopLevelToRunner ? selectedOpen : open;
     const visibleClosed = scopeTopLevelToRunner ? selectedClosed : closed;
-    const visibleExchangeOrders = scopeTopLevelToRunner ? exchangeOrders.filter(o => o.runnerId === requestedRunnerId) : exchangeOrders;
     const openPnl = visibleOpen.reduce((sum, p) => sum + (Number.isFinite(p.pnl) ? p.pnl : 0), 0);
     const closedPnl = visibleClosed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
     const selectedOpenPnl = selectedOpen.reduce((sum, p) => sum + (Number.isFinite(p.pnl) ? p.pnl : 0), 0);
@@ -1401,26 +1064,35 @@ app.get('/api/positions', async (req, res) => {
         },
       } : null,
       botStatus,
-      delta: { ...deltaClient.status(), backendSync: backendExchangeSyncStatus() },
       open: visibleOpen,
       closed: visibleClosed,
-      exchangeOrders: visibleExchangeOrders.map(o => ({
-        id: idString(o._id),
-        provider: o.provider,
-        action: o.action,
-        status: o.status,
-        runnerId: o.runnerId,
-        strategyType: o.strategyType,
-        strategyName: o.strategyName,
-        positionType: o.positionType,
-        side: o.side,
-        productSymbol: o.productSymbol,
-        size: o.size,
-        requestedQty: o.requestedQty,
-        error: o.error,
-        createdAt: o.createdAt,
-      })),
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/positions/reset-all', async (_req, res) => {
+  try {
+    const runners = Object.values(manager.runners || {});
+    for (const runner of runners) await resetRunnerToConfiguredState(runner);
+
+    await Promise.all([
+      Position.deleteMany({}),
+      Trade.deleteMany({}),
+      DailyPnl.deleteMany({}),
+      Equity.deleteMany({}),
+      Session.deleteMany({}),
+    ]);
+
+    manager.maybeStopWs();
+    await Promise.all([
+      emitPineState(),
+      emitAllInOneState(),
+      emitUTBotState(),
+      manager.sendSessionsList(io),
+    ]);
+    io.emit('all_status', manager.allStatus());
+
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1441,8 +1113,6 @@ app.get('/api/pine/config', async (_req, res) => {
       positionSizePct: cfg?.positionSizePct ?? 10,
       minProfitBookingPct: cfg?.minProfitBookingPct ?? 0.5,
       profitRatioBooking: cfg?.profitRatioBooking ?? 1.67,
-      exchangeEnabled: Boolean(cfg?.exchangeEnabled),
-      exchangeProvider: cfg?.exchangeProvider || 'delta-demo',
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1458,14 +1128,11 @@ app.post('/api/pine/upload', async (req, res) => {
       positionSizePct = 0,
       minProfitBookingPct = 0.5,
       profitRatioBooking = 1.67,
-      exchangeEnabled = false,
-      exchangeProvider = 'delta-demo',
       autoStart = false,
       setActive = false,
     } = req.body || {};
     if (!code.trim()) return res.status(400).json({ error: 'Pine code is required' });
     if (code.length > 500000) return res.status(400).json({ error: 'Pine code is too large' });
-    if (!providerMeta(String(exchangeProvider))) return res.status(400).json({ error: 'Unsupported exchange provider' });
 
     const safeCapital = +capital || 10000;
     const safeRisk = +risk || 2;
@@ -1494,8 +1161,6 @@ app.post('/api/pine/upload', async (req, res) => {
       positionSizePct: safePositionSizePct,
       minProfitBookingPct: safeMinProfitBookingPct,
       profitRatioBooking: safeProfitRatioBooking,
-      exchangeEnabled: Boolean(exchangeEnabled),
-      exchangeProvider: String(exchangeProvider),
       isActive: Boolean(setActive || autoStart),
     });
 
@@ -1527,8 +1192,6 @@ app.post('/api/pine/upload', async (req, res) => {
       positionSizePct: safePositionSizePct,
       minProfitBookingPct: safeMinProfitBookingPct,
       profitRatioBooking: safeProfitRatioBooking,
-      exchangeEnabled: Boolean(exchangeEnabled),
-      exchangeProvider: String(exchangeProvider),
       autoStarted: Boolean(autoStart),
       sessionId: runner?.sessionId || null,
     });
@@ -1559,10 +1222,9 @@ app.post('/api/pine/scripts/:id/activate', async (req, res) => {
     if (!doc) return res.status(404).json({ error: 'Pine script not found' });
     applyPineRuntimeOptions(doc, req.body || {});
     const runner = await setActivePineScript(doc);
-    runner.executionEnabled = Boolean(doc.exchangeEnabled);
     runner.strategy.reset(pineStrategyOptions(doc));
     await emitPineState();
-    res.json({ ok: true, id: doc._id.toString(), runnerId: runner.id, meta: runner.strategy.scriptMeta(), exchangeEnabled: Boolean(doc.exchangeEnabled) });
+    res.json({ ok: true, id: doc._id.toString(), runnerId: runner.id, meta: runner.strategy.scriptMeta() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1585,9 +1247,8 @@ app.post('/api/pine/scripts/:id/start', async (req, res) => {
     applyPineRuntimeOptions(doc, req.body || {});
     await doc.save();
     const runner = await setActivePineScript(doc);
-    runner.executionEnabled = Boolean(doc.exchangeEnabled);
     if (
-      req.body?.capital || req.body?.risk || req.body?.exchangeEnabled !== undefined ||
+      req.body?.capital || req.body?.risk ||
       req.body?.lotSize !== undefined || req.body?.positionSizePct !== undefined || req.body?.minProfitBookingPct !== undefined ||
       req.body?.profitRatioBooking !== undefined
     ) {
@@ -1607,7 +1268,6 @@ app.post('/api/pine/scripts/:id/new', async (req, res) => {
     applyPineRuntimeOptions(doc, { ...req.body, capital, risk });
     await doc.save();
     const runner = await setActivePineScript(doc);
-    runner.executionEnabled = Boolean(doc.exchangeEnabled);
     await runner.reset(pineStrategyOptions(doc));
     await startRunner(runner, { createNew: true });
     await emitPineState();
@@ -1653,7 +1313,6 @@ app.post('/api/pine/scripts/:id/reset', async (req, res) => {
     applyPineRuntimeOptions(doc, req.body || {});
     await doc.save();
     const runner = ensurePineRunner(doc);
-    runner.executionEnabled = Boolean(doc.exchangeEnabled);
     await runner.reset(pineStrategyOptions(doc));
     manager.maybeStopWs();
     await emitPineState();
@@ -1800,7 +1459,6 @@ app.post('/api/allinone/strategies/:key/settings', async (req, res) => {
     const doc = await AllInOneStrategyConfig.findOne({ key: req.params.key });
     if (!doc) return res.status(404).json({ error: 'All-in-one strategy not found' });
     const runner = ensureAllInOneRunner(doc);
-    runner.executionEnabled = Boolean(doc.exchangeEnabled);
     if (!runner.running) await runner.reset(allInOneStrategyOptions(doc));
     await emitAllInOneState();
     res.json({ ok: true, strategy: await allInOneRunnerSnapshot(doc.toObject()) });
@@ -1816,7 +1474,6 @@ app.post('/api/allinone/strategies/:key/start', async (req, res) => {
     doc.isActive = true;
     await doc.save();
     const runner = ensureAllInOneRunner(doc);
-    runner.executionEnabled = Boolean(doc.exchangeEnabled);
     if (req.body && Object.keys(req.body).length) await runner.reset(allInOneStrategyOptions(doc));
     await startRunner(runner, { createNew: false });
     await emitAllInOneState();
@@ -1884,7 +1541,6 @@ app.post('/api/utbot/settings', async (req, res) => {
     applyUTBotRuntimeOptions(doc, req.body || {});
     await doc.save();
     const runner = ensureUTBotRunner(doc);
-    runner.executionEnabled = Boolean(doc.exchangeEnabled);
     if (!runner.running) await runner.reset(utBotStrategyOptions(doc));
     await emitUTBotState();
     res.json({ ok: true, state: await utBotSnapshot(doc) });
@@ -1898,7 +1554,6 @@ app.post('/api/utbot/start', async (req, res) => {
     doc.isActive = true;
     await doc.save();
     const runner = ensureUTBotRunner(doc);
-    runner.executionEnabled = Boolean(doc.exchangeEnabled);
     if (req.body && Object.keys(req.body).length) await runner.reset(utBotStrategyOptions(doc));
     await startRunner(runner, { createNew: false });
     await emitUTBotState();
@@ -1973,7 +1628,6 @@ io.on('connection', async socket => {
 async function bootstrap () {
   try { await db.connect(); }
   catch (e) { console.error('[FATAL] MongoDB:', e.message); process.exit(1); }
-  await applySavedExchangeCredentials();
   await ensureAllInOneConfigs();
   const utDoc = await ensureUTBotConfig();
   const restoredUTRunner = ensureUTBotRunner(utDoc);
@@ -2020,7 +1674,6 @@ async function bootstrap () {
     }
   }
 
-  startBackendExchangeSync();
   startStrategyWatchdog();
 
   server.listen(PORT, () => {
@@ -2029,7 +1682,7 @@ async function bootstrap () {
     console.log(`  📡  http://localhost:${PORT}`);
     console.log(`  🔐  Auth: ${DASHBOARD_EMAIL}`);
     console.log(`  🗄️   MongoDB: ${process.env.MONGO_URI || 'mongodb://localhost:27017/btc_scalping_bot'}`);
-    console.log(`  🧾  Delta demo mirror: ${deltaClient.status().enabled ? 'ENABLED' : 'DISABLED'} (${deltaClient.status().productSymbol})`);
+    console.log('  🧾  Position source: local MongoDB only');
     console.log('  📝  Mode: PAPER TRADING  |  Strategies run 24/7 on server');
     console.log('═'.repeat(62) + '\n');
   });

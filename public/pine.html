@@ -165,23 +165,7 @@ tr:last-child td{border-bottom:0}
               <input class="inp" id="profit-ratio-booking" type="number" value="1.67" min="0.1" step="0.1">
             </div>
           </div>
-          <label class="check-row" style="margin-top:8px">
-            <input id="exchange-enabled" type="checkbox">
-            <span>Connect selected exchange and execute selected Pine trades</span>
-          </label>
-          <div class="grid2" style="margin-top:8px">
-            <div class="field">
-              <label class="label" for="exchange-provider">Exchange name</label>
-              <select class="inp" id="exchange-provider">
-                <option value="delta-demo">Delta Exchange Demo</option>
-              </select>
-            </div>
-            <div class="field">
-              <label class="label">API keys</label>
-              <button class="link-btn" type="button" onclick="openExchangeSettings()">Set Exchange Keys</button>
-            </div>
-          </div>
-          <div class="muted" id="exchange-key-state" style="margin-top:6px">Exchange keys loading...</div>
+          <div class="status-card muted" style="margin-top:8px">Paper trading only. Positions and PNL are tracked in local MongoDB.</div>
           <div class="btn-row">
             <button class="solid-btn" type="button" onclick="activateSelected()">Activate Selected</button>
             <button class="link-btn" type="button" onclick="newBot()">Run Selected</button>
@@ -225,7 +209,6 @@ tr:last-child td{border-bottom:0}
               <span id="chart-run-state">Stopped</span>
               <span id="chart-pos-state">Flat</span>
               <span id="chart-pnl-state">P&L --</span>
-              <span id="chart-delta-state"></span>
               <span id="chart-style-state"></span>
             </div>
           </div>
@@ -235,15 +218,14 @@ tr:last-child td{border-bottom:0}
 
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">Exchange Positions / PNL</div>
-          <div class="muted" id="positions-updated-at">Waiting for exchange sync</div>
+          <div class="panel-title">Paper Positions / PNL</div>
+          <div class="muted" id="positions-updated-at">Waiting for local data</div>
         </div>
         <div class="panel-body">
           <div class="sync-strip">
-            <span class="pill" id="positions-delta-pill">DELTA --</span>
             <span class="pill" id="positions-bot-pill">BOTS --</span>
-            <span class="pill" id="positions-countdown-pill">NEXT SYNC --</span>
-            <button class="link-btn" id="force-sync-btn" type="button" onclick="forceExchangeSync()">Force Sync</button>
+            <button class="link-btn" id="force-sync-btn" type="button" onclick="loadPaperPositions(true)">Refresh</button>
+            <button class="danger-btn" type="button" onclick="resetAllPaperData()">Delete All Positions</button>
           </div>
           <div class="positions-metrics">
             <div class="metric"><div class="metric-label">Open</div><div class="metric-value" id="pos-open-count">0</div></div>
@@ -263,7 +245,7 @@ tr:last-child td{border-bottom:0}
 
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">Closed Exchange Positions</div>
+          <div class="panel-title">Closed Paper Positions</div>
           <div class="muted" id="positions-closed-sub">Realized PNL</div>
         </div>
         <div class="panel-body">
@@ -271,21 +253,6 @@ tr:last-child td{border-bottom:0}
             <table class="wide-table">
               <thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Reason</th><th>Exit Time</th><th>Session</th></tr></thead>
               <tbody id="positions-closed-body"><tr><td colspan="11" class="muted">No closed positions.</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <div class="panel-title">Delta Demo Orders</div>
-          <div class="muted">Last 100 mirrored orders</div>
-        </div>
-        <div class="panel-body">
-          <div class="table-wrap">
-            <table class="wide-table">
-              <thead><tr><th>Status</th><th>Action</th><th>Strategy</th><th>Side</th><th>Product</th><th>Size</th><th>Bot Lots</th><th>Error</th><th>Time</th></tr></thead>
-              <tbody id="positions-orders-body"><tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -341,16 +308,6 @@ tr:last-child td{border-bottom:0}
           <input class="inp" id="editor-profit-ratio-booking" type="number" value="1.67" min="0.1" step="0.1">
         </div>
       </div>
-      <label class="check-row" style="margin-top:8px">
-        <input id="editor-exchange-enabled" type="checkbox">
-        <span>Connect selected exchange and execute trades for this Pine bot</span>
-      </label>
-      <div class="field" style="margin-top:8px">
-        <label class="label" for="editor-exchange-provider">Exchange name</label>
-        <select class="inp" id="editor-exchange-provider">
-          <option value="delta-demo">Delta Exchange Demo</option>
-        </select>
-      </div>
       <div class="field" style="margin-top:8px">
         <label class="label" for="pine-file">Upload .pine or .txt</label>
         <input class="inp" id="pine-file" type="file" accept=".pine,.txt,.pinescript,text/plain">
@@ -371,78 +328,19 @@ tr:last-child td{border-bottom:0}
   </div>
 </div>
 
-<div class="modal-backdrop" id="exchange-settings-modal">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="exchange-settings-title">
-    <div class="modal-head">
-      <div class="modal-title" id="exchange-settings-title">Exchange API Keys</div>
-      <div class="spacer"></div>
-      <div class="muted" id="exchange-settings-mode">Delta Exchange Demo</div>
-      <button class="ghost-btn" type="button" onclick="closeExchangeSettings()">Close</button>
-    </div>
-    <div class="modal-body">
-      <div class="field">
-        <label class="label" for="exchange-settings-provider">Exchange name</label>
-        <select class="inp" id="exchange-settings-provider">
-          <option value="delta-demo">Delta Exchange Demo</option>
-        </select>
-      </div>
-      <label class="check-row" style="margin-top:8px">
-        <input id="exchange-settings-enabled" type="checkbox">
-        <span>Enable this exchange for bot execution and position sync</span>
-      </label>
-      <div class="grid2" style="margin-top:8px">
-        <div class="field">
-          <label class="label" for="exchange-api-key">API key</label>
-          <input class="inp" id="exchange-api-key" type="password" autocomplete="off" placeholder="Leave blank to keep saved key">
-        </div>
-        <div class="field">
-          <label class="label" for="exchange-api-secret">API secret</label>
-          <input class="inp" id="exchange-api-secret" type="password" autocomplete="off" placeholder="Leave blank to keep saved secret">
-        </div>
-      </div>
-      <div class="grid3" style="margin-top:8px">
-        <div class="field">
-          <label class="label" for="exchange-base-url">Base URL</label>
-          <input class="inp" id="exchange-base-url" value="https://cdn-ind.testnet.deltaex.org">
-        </div>
-        <div class="field">
-          <label class="label" for="exchange-product-symbol">Product symbol</label>
-          <input class="inp" id="exchange-product-symbol" value="BTCUSD">
-        </div>
-        <div class="field">
-          <label class="label" for="exchange-product-id">Product ID</label>
-          <input class="inp" id="exchange-product-id" type="number" min="1" step="1" placeholder="Auto">
-        </div>
-      </div>
-      <div class="status-card muted" id="exchange-settings-status" style="margin-top:10px">Saved keys are masked and never shown again.</div>
-    </div>
-    <div class="modal-foot">
-      <button class="ghost-btn" type="button" onclick="closeExchangeSettings()">Cancel</button>
-      <button class="solid-btn" type="button" onclick="saveExchangeSettings()">Save Exchange Keys</button>
-    </div>
-  </div>
-</div>
-
 <script>
 const $ = id => document.getElementById(id);
 const socket = io();
 let selectedPineScriptId = null;
 let pineScripts = [];
-let exchanges = [];
-let activeExchangeStatus = null;
 let aggregateState = { running:false, paused:false, warmedUp:false, runningCount:0 };
 let runningState = { running:false, paused:false, warmedUp:false };
 let currentPrice = null;
 let baseCandles = [];
 let rawCandles = [];
 let latestStats = {};
-let selectedExchangeState = null;
 let selectedPineCode = '';
 let selectedChartMeta = {};
-let exchangeSyncInFlight = false;
-let nextExchangeSyncAt = 0;
-let lastBackendExchangeSync = null;
-const EXCHANGE_SYNC_INTERVAL_MS = 30000;
 let priceChart = null;
 let candleSeries = null;
 let emaFastSeries = null;
@@ -478,16 +376,12 @@ function getRuntimeOptions (prefix = '') {
   const sizeEl = $(prefix ? `${prefix}-lot-size` : 'lot-size');
   const minProfitEl = $(prefix ? `${prefix}-min-profit-booking` : 'min-profit-booking');
   const ratioEl = $(prefix ? `${prefix}-profit-ratio-booking` : 'profit-ratio-booking');
-  const exchangeEl = $(prefix ? `${prefix}-exchange-enabled` : 'exchange-enabled');
-  const providerEl = $(prefix ? `${prefix}-exchange-provider` : 'exchange-provider');
   return {
     capital: Number(capEl?.value) || 10000,
     risk: Number(riskEl?.value) || 2,
     lotSize: Math.max(1, Math.round(Number(sizeEl?.value) || 1)),
     minProfitBookingPct: Number(minProfitEl?.value) || 0,
     profitRatioBooking: Number(ratioEl?.value) || 1.67,
-    exchangeEnabled: Boolean(exchangeEl?.checked),
-    exchangeProvider: providerEl?.value || 'delta-demo',
   };
 }
 function setRuntimeOptions (opts = {}, prefix = '') {
@@ -496,15 +390,11 @@ function setRuntimeOptions (opts = {}, prefix = '') {
   const sizeEl = $(prefix ? `${prefix}-lot-size` : 'lot-size');
   const minProfitEl = $(prefix ? `${prefix}-min-profit-booking` : 'min-profit-booking');
   const ratioEl = $(prefix ? `${prefix}-profit-ratio-booking` : 'profit-ratio-booking');
-  const exchangeEl = $(prefix ? `${prefix}-exchange-enabled` : 'exchange-enabled');
-  const providerEl = $(prefix ? `${prefix}-exchange-provider` : 'exchange-provider');
   if (capEl) capEl.value = opts.capital || 10000;
   if (riskEl) riskEl.value = opts.riskPerTradePct || opts.risk || 2;
   if (sizeEl) sizeEl.value = opts.lotSize ?? 1;
   if (minProfitEl) minProfitEl.value = opts.minProfitBookingPct ?? 0.5;
   if (ratioEl) ratioEl.value = opts.profitRatioBooking ?? 1.67;
-  if (exchangeEl) exchangeEl.checked = Boolean(opts.exchangeEnabled);
-  if (providerEl) providerEl.value = opts.exchangeProvider || 'delta-demo';
 }
 function addLog (level, msg) {
   const row = document.createElement('div');
@@ -569,23 +459,6 @@ function aggregateForChart (candles = []) {
 function selectedScriptIsLive () {
   const script = selectedScript();
   return Boolean(script?.status?.running || script?.isActive);
-}
-function exchangeNameFor (provider = 'delta-demo') {
-  return exchanges.find(e => e.provider === provider)?.name || (provider === 'delta-demo' ? 'Delta Exchange Demo' : provider);
-}
-function updateExchangeKeyState () {
-  const el = $('exchange-key-state');
-  if (!el) return;
-  const status = activeExchangeStatus;
-  if (!status) {
-    el.textContent = 'Exchange keys loading...';
-    el.className = 'muted';
-    return;
-  }
-  const configured = status.configured ? `key ${status.maskedApiKey || 'saved'}` : 'no key saved';
-  const enabled = status.enabled ? 'enabled' : 'disabled';
-  el.textContent = `${status.name || exchangeNameFor(status.provider)} ${enabled} / ${configured} / ${status.productSymbol || 'BTCUSD'}`;
-  el.className = status.enabled && status.configured && !status.lastError ? 'pos' : (status.lastError ? 'neg' : 'muted');
 }
 
 const LC_THEME = {
@@ -741,7 +614,7 @@ function renderChartPosition (pos) {
   clearPositionLines();
   if (!candleSeries || !pos || !selectedScriptIsLive()) return;
   if (Number.isFinite(Number(pos.entry))) {
-    positionLines.entry = candleSeries.createPriceLine({ price:Number(pos.entry), color:'#f48fb1', lineWidth:1, lineStyle:0, title:pos.source === 'delta' ? 'DELTA ENTRY' : 'PINE ENTRY' });
+    positionLines.entry = candleSeries.createPriceLine({ price:Number(pos.entry), color:'#f48fb1', lineWidth:1, lineStyle:0, title:'PINE ENTRY' });
   }
   const sl = Number(pos.trailSl || pos.sl);
   const tp = Number(pos.tp);
@@ -804,28 +677,20 @@ function updateChartState () {
     : runningState.running ? (runningState.paused ? 'Paused' : (runningState.warmedUp ? 'Live' : 'Warming'))
       : script.isActive ? 'Active / stopped' : 'Saved';
   $('chart-run-state').textContent = run;
-  const useExchange = Boolean(script?.exchangeEnabled && selectedExchangeState);
-  const pos = selectedScriptIsLive()
-    ? (useExchange ? selectedExchangeState.position : latestStats.position)
-    : null;
+  const pos = selectedScriptIsLive() ? latestStats.position : null;
   let liveOpenPnl = null;
   if (pos && Number.isFinite(Number(currentPrice || pos.markPrice)) && Number.isFinite(Number(pos.entry))) {
     const mark = Number(currentPrice || pos.markPrice);
     const qty = Number(pos.qty || pos.size || 0);
     liveOpenPnl = pos.type === 'short' ? (Number(pos.entry) - mark) * qty : (mark - Number(pos.entry)) * qty;
   }
-  const markLabel = pos ? (useExchange ? pos.markPrice : currentPrice) : null;
+  const markLabel = pos ? (currentPrice || pos.markPrice) : null;
   $('chart-pos-state').innerHTML = pos
     ? `<span class="${pos.type === 'long' ? 'pos' : 'neg'}">${pos.type.toUpperCase()}</span> @ ${fmtUSD(pos.entry)}${Number.isFinite(Number(markLabel)) ? ` / Mark ${fmtUSD(markLabel)}` : ''}`
     : 'Flat';
-  const pnl = selectedScriptIsLive()
-    ? Number(useExchange
-      ? selectedExchangeState.closedPnl + (Number.isFinite(liveOpenPnl) ? liveOpenPnl : selectedExchangeState.openPnl)
-      : latestStats.totalPnl || 0)
-    : 0;
-  const src = useExchange ? 'Delta P&L' : 'P&L';
-  $('chart-pnl-state').innerHTML = `${src} <span class="${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</span>`;
-  $('chart-delta-state').textContent = script?.exchangeEnabled ? (useExchange ? 'Synced' : 'Waiting Delta sync') : '';
+  const pnl = selectedScriptIsLive() ? Number(latestStats.totalPnl || 0) : 0;
+  const displayPnl = Number.isFinite(liveOpenPnl) ? liveOpenPnl : pnl;
+  $('chart-pnl-state').innerHTML = `P&L <span class="${displayPnl >= 0 ? 'pos' : 'neg'}">${displayPnl >= 0 ? '+' : ''}${fmtUSD(displayPnl)}</span>`;
   $('chart-style-state').textContent = useHeikinAshiCandles()
     ? 'HA candles'
     : ((latestStats.indicatorSnaps || []).length ? 'Pine signal candles' : '');
@@ -871,8 +736,6 @@ function updatePineConfig ({
   lotSize,
   minProfitBookingPct,
   profitRatioBooking,
-  exchangeEnabled,
-  exchangeProvider,
 } = {}) {
   if (id !== undefined) selectedPineScriptId = id;
   if (name !== undefined) $('script-name').value = name;
@@ -884,9 +747,9 @@ function updatePineConfig ({
   if (
     capital !== undefined || riskPerTradePct !== undefined || risk !== undefined ||
     lotSize !== undefined || minProfitBookingPct !== undefined ||
-    profitRatioBooking !== undefined || exchangeEnabled !== undefined || exchangeProvider !== undefined
+    profitRatioBooking !== undefined
   ) {
-    setRuntimeOptions({ capital, riskPerTradePct, risk, lotSize, minProfitBookingPct, profitRatioBooking, exchangeEnabled, exchangeProvider });
+    setRuntimeOptions({ capital, riskPerTradePct, risk, lotSize, minProfitBookingPct, profitRatioBooking });
   }
   const selected = selectedScript();
   if (selected) setRuntimeOptions(selected);
@@ -895,14 +758,8 @@ function updatePineConfig ({
   const warnings = meta?.warnings?.length ? `<div class="neg">${esc(meta.warnings.join(' '))}</div>` : '';
   const longCond = meta?.longCondition ? `<div>Long: <b>${esc(meta.longCondition)}</b></div>` : '';
   const shortCond = meta?.shortCondition ? `<div>Short: <b>${esc(meta.shortCondition)}</b></div>` : '';
-  const provider = selected?.exchangeProvider || exchangeProvider || 'delta-demo';
-  const exchangeLabel = exchangeNameFor(provider);
-  const keyReady = !selected?.exchangeEnabled || (activeExchangeStatus?.provider === provider && activeExchangeStatus?.enabled && activeExchangeStatus?.configured);
-  const exchangeLine = selected?.exchangeEnabled
-    ? `<div class="${keyReady ? 'pos' : 'warn'}">Execution: <b>${esc(exchangeLabel)}</b>${keyReady ? '' : ' / API keys not enabled'}</div>`
-    : '<div class="muted">Execution: Paper only</div>';
   $('script-status').innerHTML = hasScript
-    ? `<div>Loaded: <b>${esc(scriptName)}</b></div>${longCond}${shortCond}${exchangeLine}${warnings}`
+    ? `<div>Loaded: <b>${esc(scriptName)}</b></div>${longCond}${shortCond}<div class="muted">Execution: Paper only</div>${warnings}`
     : 'No Pine script loaded.';
   if (baseCandles.length) renderCandles(baseCandles, false);
   updateChartState();
@@ -919,7 +776,7 @@ function renderScripts (scripts = pineScripts) {
       const bits = [
         s.meta?.longCondition ? 'Long' : null,
         s.meta?.shortCondition ? 'Short' : null,
-        s.exchangeEnabled ? exchangeNameFor(s.exchangeProvider || 'delta-demo') : 'Paper',
+        'Paper',
         s.capital ? `Cap ${fmtUSD(s.capital)}` : null,
         s.lotSize !== undefined ? `Lot ${Number(s.lotSize).toFixed(0)}` : null,
         s.minProfitBookingPct !== undefined ? `Min ${Number(s.minProfitBookingPct).toFixed(2)}%` : null,
@@ -927,7 +784,7 @@ function renderScripts (scripts = pineScripts) {
         s.updatedAt ? fmtDT(s.updatedAt) : null,
       ].filter(Boolean).join(' / ');
       const activeRunning = s.status?.running;
-      const badgeText = activeRunning ? (s.status?.paused ? 'PAUSED' : 'RUNNING') : (s.exchangeEnabled ? 'EXCHANGE' : (s.isActive ? 'ACTIVE' : 'SAVED'));
+      const badgeText = activeRunning ? (s.status?.paused ? 'PAUSED' : 'RUNNING') : (s.isActive ? 'ACTIVE' : 'SAVED');
       const badgeClass = activeRunning || s.isActive ? 'active' : 'saved';
       return `<div class="script-row ${s.id === selectedPineScriptId ? 'active' : ''}" onclick="selectScript('${esc(s.id)}')">
         <div>
@@ -948,7 +805,6 @@ function renderScripts (scripts = pineScripts) {
 }
 function selectScript (id) {
   selectedPineScriptId = id;
-  selectedExchangeState = null;
   renderScripts();
   if (!selectedScriptIsLive()) {
     setTradeMarkers([]);
@@ -958,67 +814,10 @@ function selectScript (id) {
     renderChartPosition(latestStats.position);
   }
   loadSelectedRuntime();
-  loadExchangePositions();
+  loadPaperPositions().catch(() => {});
 }
 async function loadScripts () {
   renderScripts(await api('/api/pine/runners'));
-}
-async function loadExchanges () {
-  const data = await api('/api/exchanges');
-  exchanges = data.exchanges || [];
-  activeExchangeStatus = exchanges.find(e => e.provider === 'delta-demo') || null;
-  updateExchangeKeyState();
-  return exchanges;
-}
-async function openExchangeSettings () {
-  try {
-    if (!exchanges.length) await loadExchanges();
-  } catch (err) {
-    addLog('error', `Exchange settings load failed: ${err.message}`);
-  }
-  const provider = $('exchange-provider')?.value || activeExchangeStatus?.provider || 'delta-demo';
-  const status = exchanges.find(e => e.provider === provider) || activeExchangeStatus || {};
-  $('exchange-settings-provider').value = provider;
-  $('exchange-settings-enabled').checked = Boolean(status.enabled);
-  $('exchange-api-key').value = '';
-  $('exchange-api-secret').value = '';
-  $('exchange-base-url').value = status.baseUrl || 'https://cdn-ind.testnet.deltaex.org';
-  $('exchange-product-symbol').value = status.productSymbol || 'BTCUSD';
-  $('exchange-product-id').value = status.productId || '';
-  $('exchange-settings-mode').textContent = status.name || exchangeNameFor(provider);
-  $('exchange-settings-status').innerHTML = status.configured
-    ? `Saved key: <b>${esc(status.maskedApiKey || 'configured')}</b> / Source: ${esc(status.credentialSource || 'database')}`
-    : 'No saved API key for this exchange.';
-  $('exchange-settings-modal').classList.add('open');
-}
-function closeExchangeSettings () {
-  $('exchange-settings-modal').classList.remove('open');
-}
-async function saveExchangeSettings () {
-  const provider = $('exchange-settings-provider').value || 'delta-demo';
-  try {
-    const payload = {
-      enabled: $('exchange-settings-enabled').checked,
-      apiKey: $('exchange-api-key').value.trim(),
-      apiSecret: $('exchange-api-secret').value.trim(),
-      baseUrl: $('exchange-base-url').value.trim(),
-      productSymbol: $('exchange-product-symbol').value.trim(),
-      productId: $('exchange-product-id').value.trim(),
-    };
-    const data = await api(`/api/exchanges/${encodeURIComponent(provider)}`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body:JSON.stringify(payload),
-    });
-    activeExchangeStatus = data.exchange;
-    await loadExchanges();
-    closeExchangeSettings();
-    addLog('success', `${exchangeNameFor(provider)} API settings saved.`);
-    loadExchangePositions({ forced:true }).catch(() => {});
-  } catch (err) {
-    $('exchange-settings-status').innerHTML = `<span class="neg">${esc(err.message)}</span>`;
-    addLog('error', `Exchange settings save failed: ${err.message}`);
-  }
 }
 function openEditor () {
   $('pine-editor-modal').classList.add('open');
@@ -1244,6 +1043,7 @@ async function loadSelectedRuntime () {
     updateStatus({ running:false, paused:false, warmedUp:false });
     applySessionInfo(null);
     applyStats({ totalPnl:0, totalReturn:0, dayPnl:0, totalTrades:0, position:null, recentTrades:[] });
+    await loadPaperPositions().catch(() => {});
     return;
   }
   try {
@@ -1261,6 +1061,7 @@ async function loadSelectedRuntime () {
     setTradeMarkers(trades);
   } catch (err) {}
   await loadScripts().catch(() => {});
+  await loadPaperPositions().catch(() => {});
 }
 
 async function runBacktest () {
@@ -1321,25 +1122,11 @@ function renderPositionSummary (data = {}) {
   setPnlMetric('pos-open-pnl', s.openPnl || 0);
   setPnlMetric('pos-closed-pnl', s.closedPnl || 0);
   setPnlMetric('pos-net-pnl', s.netPnl || 0);
-  const delta = data.delta || {};
-  const backend = delta.backendSync || {};
-  lastBackendExchangeSync = backend.latest || lastBackendExchangeSync;
-  const deltaPill = $('positions-delta-pill');
-  const syncedAt = delta.lastSyncAt || lastBackendExchangeSync?.syncedAt;
-  const synced = syncedAt ? ` ${new Date(syncedAt).toLocaleTimeString()}` : '';
-  deltaPill.textContent = delta.enabled ? `DELTA ON ${delta.productSymbol || ''}${synced}` : 'DELTA OFF';
-  const syncErrors = [
-    ...(delta.syncErrors || []),
-    ...(lastBackendExchangeSync?.errors || []),
-    ...(delta.lastError ? [delta.lastError] : []),
-  ];
-  deltaPill.className = `pill ${delta.enabled && !syncErrors.length ? 'pos' : 'neg'}`;
   const bot = data.botStatus || {};
   const running = Number(bot.runningCount || 0);
   $('positions-bot-pill').textContent = running ? `BOTS ${running} LIVE / PINE ${bot.pine?.runningCount || 0}` : 'BOTS STOPPED';
   $('positions-bot-pill').className = `pill ${running ? 'pos' : ''}`;
-  const backendText = lastBackendExchangeSync?.syncedAt ? ` / backend ${new Date(lastBackendExchangeSync.syncedAt).toLocaleTimeString()}` : '';
-  $('positions-updated-at').textContent = `${data.source === 'delta' ? 'Exchange synced' : 'Local data'} ${new Date().toLocaleTimeString()}${backendText}`;
+  $('positions-updated-at').textContent = `Local data ${new Date().toLocaleTimeString()}`;
 }
 
 function renderExchangeOpen (rows = []) {
@@ -1363,104 +1150,38 @@ function renderExchangeClosed (rows = []) {
     </tr>`).join('') : '<tr><td colspan="11" class="muted">No closed positions.</td></tr>';
 }
 
-function renderExchangeOrders (rows = []) {
-  $('positions-orders-body').innerHTML = rows.length ? rows.map(o => `
-    <tr>
-      <td class="${o.status === 'sent' ? 'pos' : (o.status === 'failed' ? 'neg' : 'warn')}">${esc(String(o.status || '--').toUpperCase())}</td>
-      <td>${esc(o.action || '--')}</td><td>${esc(o.strategyName || o.runnerId || '--')}</td><td>${esc(o.side || '--')}</td>
-      <td>${esc(o.productSymbol || '--')}</td><td>${Number(o.size || 0).toFixed(0)}</td><td>${Number(o.requestedQty || 0).toFixed(0)}</td>
-      <td class="neg">${esc(o.error || '')}</td><td>${fmtTime(o.createdAt)}</td>
-    </tr>`).join('') : '<tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr>';
-}
-
-function updateExchangeSyncCountdown () {
-  const pill = $('positions-countdown-pill');
-  if (!pill) return;
-  if (exchangeSyncInFlight) {
-    pill.textContent = 'SYNCING...';
-    pill.className = 'pill warn';
-    return;
-  }
-  if (!nextExchangeSyncAt) {
-    pill.textContent = 'NEXT SYNC --';
-    pill.className = 'pill';
-    return;
-  }
-  const secs = Math.max(0, Math.ceil((nextExchangeSyncAt - Date.now()) / 1000));
-  pill.textContent = `NEXT SYNC ${secs}s`;
-  pill.className = `pill ${secs <= 5 ? 'warn' : ''}`;
-}
-
-function scheduleNextExchangeSync () {
-  nextExchangeSyncAt = Date.now() + EXCHANGE_SYNC_INTERVAL_MS;
-  updateExchangeSyncCountdown();
-}
-
-function syncSelectedPineFromExchange (data = {}) {
-  const script = selectedScript();
-  if (!script?.exchangeEnabled || data.source !== 'delta') {
-    selectedExchangeState = null;
-    updateChartState();
-    return;
-  }
-  const selected = data.selected || {};
-  const openRows = selected.open || [];
-  const closedRows = selected.closed || [];
-  const summary = selected.summary || {};
-  const position = openRows[0] || null;
-  selectedExchangeState = {
-    pnl: Number(summary.netPnl ?? ((summary.openPnl || 0) + (summary.closedPnl || 0))),
-    openPnl: Number(summary.openPnl || 0),
-    closedPnl: Number(summary.closedPnl || 0),
-    position: position ? { ...position, markPrice: currentPrice || position.markPrice } : null,
-    closedRows,
-  };
-  updateChartState();
-}
-
-async function loadExchangePositions ({ forced = false } = {}) {
-  if (exchangeSyncInFlight) return;
-  exchangeSyncInFlight = true;
-  updateExchangeSyncCountdown();
+async function loadPaperPositions (forced = false) {
   const forceBtn = $('force-sync-btn');
   if (forceBtn) forceBtn.disabled = true;
   try {
     const params = new URLSearchParams({ limit:'1000' });
     if (selectedPineScriptId) params.set('pineScriptId', selectedPineScriptId);
-    if (forced) params.set('force', '1');
     const data = await api(`/api/positions?${params.toString()}`);
     renderPositionSummary(data);
-    renderExchangeOpen(data.open || []);
-    renderExchangeClosed(data.closed || []);
-    renderExchangeOrders(data.exchangeOrders || []);
-    syncSelectedPineFromExchange(data);
-    scheduleNextExchangeSync();
-    if (forced) addLog('success', 'Exchange force sync completed.');
+    renderExchangeOpen(data.selected?.open || data.open || []);
+    renderExchangeClosed(data.selected?.closed || data.closed || []);
+    if (forced) addLog('success', 'Paper positions refreshed.');
   } catch (err) {
-    selectedExchangeState = null;
     updateChartState();
-    $('positions-updated-at').textContent = `Sync failed: ${err.message}`;
-    scheduleNextExchangeSync();
+    $('positions-updated-at').textContent = `Refresh failed: ${err.message}`;
   } finally {
-    exchangeSyncInFlight = false;
     if (forceBtn) forceBtn.disabled = false;
-    updateExchangeSyncCountdown();
   }
 }
 
-function forceExchangeSync () {
-  loadExchangePositions({ forced:true });
-}
-
-function maybeAutoExchangeSync () {
-  updateExchangeSyncCountdown();
-  if (!exchangeSyncInFlight && nextExchangeSyncAt && Date.now() >= nextExchangeSyncAt) {
-    loadExchangePositions();
+async function resetAllPaperData () {
+  if (!confirm('Delete all paper positions, trades, and P&L history? This will stop running paper bots and reset all sessions.')) return;
+  try {
+    await api('/api/positions/reset-all', { method:'POST' });
+    await loadSelectedRuntime();
+    await loadPaperPositions();
+    addLog('warn', 'All paper positions, trades, and P&L were deleted.');
+  } catch (err) {
+    addLog('error', `Delete all failed: ${err.message}`);
   }
 }
 
 async function loadInitial () {
-  try { await loadExchanges(); } catch (err) { addLog('error', `Could not load exchanges: ${err.message}`); }
   try {
     const cfg = await api('/api/pine/config');
     updatePineConfig(cfg);
@@ -1471,13 +1192,12 @@ async function loadInitial () {
   } catch (err) {}
   try { await loadScripts(); } catch (err) { addLog('error', `Could not load scripts: ${err.message}`); }
   await loadSelectedRuntime();
-  await loadExchangePositions();
+  await loadPaperPositions();
 }
 
 socket.on('ticker', t => {
   currentPrice = Number(t.price);
   $('price').textContent = fmtUSD(t.price);
-  if (selectedExchangeState?.position) selectedExchangeState.position.markPrice = currentPrice;
   updateChartState();
 });
 socket.on('candles', renderCandles);
@@ -1489,13 +1209,6 @@ socket.on('ws_status', s => {
   $('ws-ticker').className = s.ticker ? 'pos' : 'neg';
 });
 socket.on('all_status', status => updateHeaderStatus(status.pine || {}));
-socket.on('exchange:sync', sync => {
-  lastBackendExchangeSync = sync || null;
-  const errCount = Array.isArray(sync?.errors) ? sync.errors.length : 0;
-  $('positions-updated-at').textContent = errCount
-    ? `Backend exchange sync failed ${new Date().toLocaleTimeString()}`
-    : `Backend exchange synced ${sync?.syncedAt ? new Date(sync.syncedAt).toLocaleTimeString() : new Date().toLocaleTimeString()}`;
-});
 socket.on('pine:status', updateHeaderStatus);
 socket.on('pine:runner_event', payload => {
   if (!payload?.scriptId) return;
@@ -1515,9 +1228,11 @@ socket.on('pine:runner_event', payload => {
     renderChartPosition(payload.data);
     addChartMarker(payload.data.entryTime || Date.now(), payload.data.type, null);
     updateChartState();
+    loadPaperPositions().catch(() => {});
   }
   if (payload.event === 'trade_closed') {
     addChartMarker(payload.data.exitTime || Date.now(), payload.data.type, payload.data.pnl);
+    loadPaperPositions().catch(() => {});
     loadSelectedRuntime().catch(() => {});
   }
 });
@@ -1540,32 +1255,11 @@ window.addEventListener('load', () => {
     $('pine-code').value = await file.text();
     $('editor-mode').textContent = `Loaded file ${file.name}`;
   });
-  $('exchange-settings-provider').addEventListener('change', e => {
-    const provider = e.target.value || 'delta-demo';
-    const status = exchanges.find(x => x.provider === provider) || {};
-    $('exchange-provider').value = provider;
-    $('exchange-settings-enabled').checked = Boolean(status.enabled);
-    $('exchange-api-key').value = '';
-    $('exchange-api-secret').value = '';
-    $('exchange-base-url').value = status.baseUrl || 'https://cdn-ind.testnet.deltaex.org';
-    $('exchange-product-symbol').value = status.productSymbol || 'BTCUSD';
-    $('exchange-product-id').value = status.productId || '';
-    $('exchange-settings-mode').textContent = status.name || exchangeNameFor(provider);
-    $('exchange-settings-status').innerHTML = status.configured
-      ? `Saved key: <b>${esc(status.maskedApiKey || 'configured')}</b> / Source: ${esc(status.credentialSource || 'database')}`
-      : 'No saved API key for this exchange.';
-  });
   $('pine-editor-modal').addEventListener('click', e => {
     if (e.target.id === 'pine-editor-modal') closeEditor();
   });
-  $('exchange-settings-modal').addEventListener('click', e => {
-    if (e.target.id === 'exchange-settings-modal') closeExchangeSettings();
-  });
   window.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      closeEditor();
-      closeExchangeSettings();
-    }
+    if (e.key === 'Escape') closeEditor();
   });
   const now = new Date();
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -1574,8 +1268,6 @@ window.addEventListener('load', () => {
   updateHeaderStatus();
   updateStatus();
   loadInitial();
-  scheduleNextExchangeSync();
-  setInterval(maybeAutoExchangeSync, 1000);
   addLog('info', 'Pine Upload Bot page ready.');
 });
 </script>

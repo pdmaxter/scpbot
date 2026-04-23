@@ -81,17 +81,15 @@ button:disabled{opacity:.35;cursor:not-allowed}
           <div class="muted" id="session-badge">No session</div>
         </div>
         <div class="panel-body">
-          <div id="selected-status" class="status-card muted">Timeframe, capital, and exchange settings apply to all 10 strategies. Target and SL are automatic.</div>
+          <div id="selected-status" class="status-card muted">Timeframe and capital apply to all 10 strategies. Positions are tracked with paper trading in local MongoDB.</div>
           <div class="grid2" style="margin-top:10px">
             <div class="field"><label class="label" for="timeframe">Timeframe</label><select class="inp" id="timeframe"><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option></select></div>
             <div class="field"><label class="label" for="capital">Total capital</label><input class="inp" id="capital" type="number" min="100" step="100" value="1000"></div>
           </div>
           <div class="grid2" style="margin-top:8px">
-            <div class="field"><label class="label" for="exchange-provider">Exchange name</label><select class="inp" id="exchange-provider"><option value="delta-demo">Delta Exchange Demo</option></select></div>
+            <div class="field"><label class="label">Mode</label><div class="status-card muted">Paper trading only.</div></div>
             <div class="field"><label class="label">Auto exits</label><div class="status-card muted">Strategies decide Target, SL, and trailing from their built-in ATR logic.</div></div>
           </div>
-          <label class="check-row" style="margin-top:8px"><input id="exchange-enabled" type="checkbox"><span>Connect selected exchange and place orders on buy/sell signals</span></label>
-          <div class="muted" id="exchange-key-state" style="margin-top:6px">Exchange keys loading...</div>
           <div class="btn-row">
             <button class="ghost-btn" type="button" onclick="saveSettings()">Save Settings</button>
             <button class="solid-btn" id="btn-start" type="button" onclick="startSelected()">Start</button>
@@ -116,9 +114,9 @@ button:disabled{opacity:.35;cursor:not-allowed}
         </div>
       </section>
       <section class="panel">
-        <div class="panel-head"><div class="panel-title">Exchange Positions / PNL</div><div class="muted" id="positions-updated-at">Waiting for exchange sync</div></div>
+        <div class="panel-head"><div class="panel-title">Paper Positions / PNL</div><div class="muted" id="positions-updated-at">Waiting for local data</div></div>
         <div class="panel-body">
-          <div class="sync-strip"><span class="pill" id="positions-delta-pill">DELTA --</span><span class="pill" id="positions-bot-pill">BOTS --</span><button class="link-btn" type="button" onclick="loadPositions(true)">Force Sync</button></div>
+          <div class="sync-strip"><span class="pill" id="positions-bot-pill">BOTS --</span><button class="link-btn" type="button" onclick="loadPositions(true)">Refresh</button><button class="danger-btn" type="button" onclick="resetAllPaperData()">Delete All Positions</button></div>
           <div class="positions-metrics">
             <div class="metric"><div class="metric-label">Open</div><div class="metric-value" id="pos-open-count">0</div></div>
             <div class="metric"><div class="metric-label">Closed</div><div class="metric-value" id="pos-closed-count">0</div></div>
@@ -132,10 +130,6 @@ button:disabled{opacity:.35;cursor:not-allowed}
       <section class="panel">
         <div class="panel-head"><div class="panel-title">Closed Positions</div><div class="muted" id="positions-closed-sub">Realized PNL</div></div>
         <div class="panel-body"><div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Reason</th><th>Exit Time</th><th>Session</th></tr></thead><tbody id="positions-closed-body"><tr><td colspan="11" class="muted">No closed positions.</td></tr></tbody></table></div></div>
-      </section>
-      <section class="panel">
-        <div class="panel-head"><div class="panel-title">Delta Demo Orders</div><div class="muted">Last 100 mirrored orders</div></div>
-        <div class="panel-body"><div class="table-wrap"><table class="wide-table"><thead><tr><th>Status</th><th>Action</th><th>Strategy</th><th>Side</th><th>Product</th><th>Size</th><th>Bot Lots</th><th>Error</th><th>Time</th></tr></thead><tbody id="positions-orders-body"><tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr></tbody></table></div></div>
       </section>
       <section class="panel">
         <div class="panel-head"><div class="panel-title">Activity</div><button class="ghost-btn" type="button" onclick="clearLog()">Clear</button></div>
@@ -155,7 +149,6 @@ let baseCandles = [];
 let rawCandles = [];
 let latestStats = {};
 let currentPrice = null;
-let exchanges = [];
 let priceChart = null;
 let candleSeries = null;
 let markerData = [];
@@ -169,7 +162,6 @@ async function api (path, opts = {}) { const res = await fetch(path, opts); cons
 function selectedStrategy () { return strategies.find(s => s.key === selectedKey) || null; }
 function pnlCls (n) { return Number(n) > 0 ? 'pos' : (Number(n) < 0 ? 'neg' : ''); }
 function badge (txt, kind) { return `<span class="badge ${esc(kind || '')}">${esc(txt || '--')}</span>`; }
-function exchangeNameFor (provider = 'delta-demo') { return exchanges.find(e => e.provider === provider)?.name || 'Delta Exchange Demo'; }
 const TF_MS = { '5m':300000, '15m':900000, '30m':1800000, '1h':3600000, '4h':14400000 };
 function chartTimeframe () { return selectedStrategy()?.timeframe || $('timeframe')?.value || '5m'; }
 function validCandle (c) {
@@ -222,15 +214,11 @@ function options () {
   return {
     timeframe: $('timeframe').value,
     capital: Number($('capital').value) || 1000,
-    exchangeEnabled: $('exchange-enabled').checked,
-    exchangeProvider: $('exchange-provider').value || 'delta-demo',
   };
 }
 function setOptions (s = {}) {
   $('timeframe').value = s.timeframe || '5m';
   $('capital').value = s.capital || 1000;
-  $('exchange-enabled').checked = Boolean(s.exchangeEnabled);
-  $('exchange-provider').value = s.exchangeProvider || 'delta-demo';
   if (baseCandles.length) renderCandles(baseCandles, false);
 }
 function addLog (level, msg) {
@@ -262,7 +250,7 @@ function renderStrategies (rows = strategies) {
   $('strategy-list').innerHTML = strategies.length ? strategies.map(s => {
     const bits = [
       s.timeframe,
-      s.exchangeEnabled ? exchangeNameFor(s.exchangeProvider) : 'Paper',
+      'Paper',
       `Cap ${fmtUSD(s.capital)}`,
       'Auto Target/SL',
       s.updatedAt ? fmtTime(s.updatedAt) : null,
@@ -271,7 +259,7 @@ function renderStrategies (rows = strategies) {
     return `<div class="script-row ${s.key === selectedKey ? 'active' : ''}" onclick="selectStrategy('${esc(s.key)}')">
       <div><div class="script-name">${esc(s.name)}</div><div class="script-meta">${esc(bits)}</div></div>
       <div class="row-actions">
-        <span class="badge ${running || s.isActive ? 'active' : 'saved'}">${running ? (s.status.paused ? 'PAUSED' : 'RUNNING') : (s.exchangeEnabled ? 'EXCHANGE' : 'READY')}</span>
+        <span class="badge ${running || s.isActive ? 'active' : 'saved'}">${running ? (s.status.paused ? 'PAUSED' : 'RUNNING') : 'READY'}</span>
         <button class="toggle-btn ${running ? 'stop' : 'start'}" type="button" onclick="toggleStrategy(event,'${esc(s.key)}')">${running ? 'Stop' : 'Start'}</button>
       </div>
     </div>`;
@@ -294,13 +282,6 @@ async function loadStrategies () { renderStrategies(await api('/api/allinone/str
 async function loadCommonSettings () {
   const settings = await api('/api/allinone/settings');
   setOptions(settings);
-}
-async function loadExchanges () {
-  const data = await api('/api/exchanges');
-  exchanges = data.exchanges || [];
-  const st = exchanges.find(e => e.provider === 'delta-demo');
-  $('exchange-key-state').textContent = st ? `${st.name} ${st.enabled ? 'enabled' : 'disabled'} / ${st.configured ? (st.maskedApiKey || 'key saved') : 'no key saved'}` : 'No exchange configured';
-  $('exchange-key-state').className = st?.enabled && st?.configured ? 'pos' : 'muted';
 }
 async function persistCommonSettings () {
   return api('/api/allinone/settings', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
@@ -412,7 +393,7 @@ function updateChartState () {
   const pnl = Number(latestStats.totalPnl || 0);
   $('chart-pnl-state').innerHTML = `P&L <span class="${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</span>`;
   renderChartPosition(pos);
-  $('selected-status').innerHTML = s ? `<b>${esc(s.name)}</b><br><span class="muted">${esc(s.timeframe)} / ${s.exchangeEnabled ? esc(exchangeNameFor(s.exchangeProvider)) : 'Paper'} / Capital ${fmtUSD(s.capital)}</span>` : 'Select a strategy.';
+  $('selected-status').innerHTML = s ? `<b>${esc(s.name)}</b><br><span class="muted">${esc(s.timeframe)} / Paper / Capital ${fmtUSD(s.capital)}</span>` : 'Select a strategy.';
 }
 function setPnlMetric (id, value) { const el = $(id); el.className = `metric-value ${pnlCls(value)}`; el.textContent = fmtUSD(value); }
 function renderPositions (data = {}) {
@@ -422,25 +403,30 @@ function renderPositions (data = {}) {
   setPnlMetric('pos-open-pnl', summary.openPnl || 0);
   setPnlMetric('pos-closed-pnl', summary.closedPnl || 0);
   setPnlMetric('pos-net-pnl', summary.netPnl || 0);
-  const delta = data.delta || {};
-  $('positions-delta-pill').textContent = delta.enabled ? `DELTA ON ${delta.productSymbol || ''}` : 'DELTA OFF';
-  $('positions-delta-pill').className = `pill ${delta.enabled && !delta.lastError ? 'pos' : 'neg'}`;
   const running = Number(data.botStatus?.runningCount || 0);
   $('positions-bot-pill').textContent = running ? `BOTS ${running} LIVE` : 'BOTS STOPPED';
-  $('positions-updated-at').textContent = `${data.source === 'delta' ? 'Exchange synced' : 'Local data'} ${new Date().toLocaleTimeString()}`;
+  $('positions-updated-at').textContent = `Local data ${new Date().toLocaleTimeString()}`;
   $('positions-open-body').innerHTML = (data.open || []).length ? data.open.map(p => `<tr><td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td><td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${Number(p.size || p.qty || 0).toFixed(0)}</td><td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td><td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="10" class="muted">No open positions.</td></tr>';
   const closed = data.closed || [];
   $('positions-closed-sub').textContent = `${closed.length} closed`;
   $('positions-closed-body').innerHTML = closed.length ? closed.map(t => `<tr><td>${badge('closed','closed')}</td><td>${esc(t.strategyName || '--')}</td><td>${badge(t.type,t.type)}</td><td>${fmtUSD(t.entry)}</td><td>${fmtUSD(t.exit)}</td><td>${Number(t.size || t.qty || 0).toFixed(0)}</td><td class="${pnlCls(t.pnl)}">${fmtUSD(t.pnl)}</td><td class="${pnlCls(t.pnlPct)}">${fmtPct(t.pnlPct)}</td><td>${esc(t.reason || '--')}</td><td>${fmtTime(t.exitTime)}</td><td>${esc(t.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="11" class="muted">No closed positions.</td></tr>';
-  const orders = data.exchangeOrders || [];
-  $('positions-orders-body').innerHTML = orders.length ? orders.map(o => `<tr><td class="${o.status === 'sent' ? 'pos' : (o.status === 'failed' ? 'neg' : 'warn')}">${esc(String(o.status || '--').toUpperCase())}</td><td>${esc(o.action || '--')}</td><td>${esc(o.strategyName || o.runnerId || '--')}</td><td>${esc(o.side || '--')}</td><td>${esc(o.productSymbol || '--')}</td><td>${Number(o.size || 0).toFixed(0)}</td><td>${Number(o.requestedQty || 0).toFixed(0)}</td><td class="neg">${esc(o.error || '')}</td><td>${fmtTime(o.createdAt)}</td></tr>`).join('') : '<tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr>';
 }
 async function loadPositions (forced = false) {
   const data = await api(`/api/positions?limit=1000${forced ? '&force=1' : ''}`);
   renderPositions(data);
 }
+async function resetAllPaperData () {
+  if (!confirm('Delete all paper positions, trades, and P&L history? This will stop running paper bots and reset all sessions.')) return;
+  try {
+    await api('/api/positions/reset-all', { method:'POST' });
+    await loadStrategies();
+    await loadPositions(false);
+    addLog('warn', 'All paper positions, trades, and P&L were deleted.');
+  } catch (err) {
+    addLog('error', `Delete all failed: ${err.message}`);
+  }
+}
 async function loadInitial () {
-  await loadExchanges().catch(err => addLog('error', `Exchange load failed: ${err.message}`));
   await loadStrategies().catch(err => addLog('error', `Strategies load failed: ${err.message}`));
   await loadCommonSettings().catch(err => addLog('error', `Common settings load failed: ${err.message}`));
   const candles = await api('/api/candles').catch(() => []);
@@ -465,7 +451,6 @@ socket.on('allinone:runner_event', payload => {
   }
   renderStrategies();
 });
-socket.on('exchange:sync', () => loadPositions(false).catch(() => {}));
 socket.on('log', l => { const id = String(l.strategyId || l.strategy || ''); if (!id || id.startsWith('allinone:')) addLog(l.level || 'info', l.msg || ''); });
 socket.on('connect', () => addLog('success', 'Connected to server.'));
 socket.on('disconnect', () => addLog('error', 'Disconnected from server.'));

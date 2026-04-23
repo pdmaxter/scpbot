@@ -60,11 +60,9 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var
           <div class="grid3" style="margin-top:8px">
             <div class="field"><label class="label" for="key-value">Sensitivity</label><input class="inp" id="key-value" type="number" min="0.1" step="0.1" value="1"></div>
             <div class="field"><label class="label" for="atr-period">ATR period</label><input class="inp" id="atr-period" type="number" min="2" step="1" value="10"></div>
-            <div class="field"><label class="label" for="exchange-provider">Exchange name</label><select class="inp" id="exchange-provider"><option value="delta-demo">Delta Exchange Demo</option></select></div>
+            <div class="field"><label class="label">Mode</label><div class="status-card muted">Paper trading only. Positions and PNL are tracked in local MongoDB.</div></div>
           </div>
           <label class="check-row" style="margin-top:8px"><input id="heikin-enabled" type="checkbox"><span>Use Heikin Ashi signal source</span></label>
-          <label class="check-row" style="margin-top:8px"><input id="exchange-enabled" type="checkbox"><span>Connect selected exchange and place orders on BUY/SELL signals</span></label>
-          <div class="muted" id="exchange-key-state" style="margin-top:6px">Exchange keys loading...</div>
           <div class="btn-row">
             <button class="ghost-btn" type="button" onclick="saveSettings()">Save Settings</button>
             <button class="solid-btn" id="btn-start" type="button" onclick="startBot()">Start</button>
@@ -91,9 +89,9 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var
         </div>
       </section>
       <section class="panel">
-        <div class="panel-head"><div class="panel-title">Exchange Positions / PNL</div><div class="muted" id="positions-updated-at">Waiting for exchange sync</div></div>
+        <div class="panel-head"><div class="panel-title">Paper Positions / PNL</div><div class="muted" id="positions-updated-at">Waiting for local data</div></div>
         <div class="panel-body">
-          <div class="sync-strip"><span class="pill" id="positions-delta-pill">DELTA --</span><span class="pill" id="positions-bot-pill">BOTS --</span><button class="link-btn" type="button" onclick="loadPositions(true)">Force Sync</button></div>
+          <div class="sync-strip"><span class="pill" id="positions-bot-pill">BOTS --</span><button class="link-btn" type="button" onclick="loadPositions(true)">Refresh</button><button class="danger-btn" type="button" onclick="resetAllPaperData()">Delete All Positions</button></div>
           <div class="positions-metrics">
             <div class="metric"><div class="metric-label">Open</div><div class="metric-value" id="pos-open-count">0</div></div>
             <div class="metric"><div class="metric-label">Closed</div><div class="metric-value" id="pos-closed-count">0</div></div>
@@ -108,10 +106,6 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var
         <div class="panel-head"><div class="panel-title">Closed Positions</div><div class="muted" id="positions-closed-sub">Realized PNL</div></div>
         <div class="panel-body"><div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Reason</th><th>Exit Time</th><th>Session</th></tr></thead><tbody id="positions-closed-body"><tr><td colspan="11" class="muted">No closed positions.</td></tr></tbody></table></div></div>
       </section>
-      <section class="panel">
-        <div class="panel-head"><div class="panel-title">Delta Demo Orders</div><div class="muted">Last 100 mirrored orders</div></div>
-        <div class="panel-body"><div class="table-wrap"><table class="wide-table"><thead><tr><th>Status</th><th>Action</th><th>Strategy</th><th>Side</th><th>Product</th><th>Size</th><th>Bot Qty</th><th>Error</th><th>Time</th></tr></thead><tbody id="positions-orders-body"><tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr></tbody></table></div></div>
-      </section>
     </div>
   </main>
 </div>
@@ -120,7 +114,6 @@ const $ = id => document.getElementById(id);
 const socket = io();
 let state = null;
 let runningState = { running:false, paused:false, warmedUp:false };
-let exchanges = [];
 let baseCandles = [];
 let rawCandles = [];
 let latestStats = {};
@@ -225,8 +218,6 @@ function settings () {
     useHeikinAshi: $('heikin-enabled').checked,
     buyFeePct: Number($('buy-fee').value) || 0,
     sellFeePct: Number($('sell-fee').value) || 0,
-    exchangeEnabled: $('exchange-enabled').checked,
-    exchangeProvider: $('exchange-provider').value || 'delta-demo',
   };
 }
 function setSettings (s = {}) {
@@ -237,8 +228,6 @@ function setSettings (s = {}) {
   $('heikin-enabled').checked = Boolean(s.useHeikinAshi);
   $('buy-fee').value = s.buyFeePct || 0;
   $('sell-fee').value = s.sellFeePct || 0;
-  $('exchange-enabled').checked = Boolean(s.exchangeEnabled);
-  $('exchange-provider').value = s.exchangeProvider || 'delta-demo';
   if (baseCandles.length) renderCandles(baseCandles, false);
 }
 function addLog (level, msg) {
@@ -317,13 +306,6 @@ function refreshUTChartOverlays () {
   if (candleSeries) candleSeries.setMarkers(markerData.slice(-200));
   if ($('chart-alert-state')) $('chart-alert-state').textContent = lastAlert ? `Last ${lastAlert.side} ${fmtTime(lastAlert.time)}` : 'Alert --';
 }
-async function loadExchanges () {
-  const data = await api('/api/exchanges');
-  exchanges = data.exchanges || [];
-  const st = exchanges.find(e => e.provider === 'delta-demo');
-  $('exchange-key-state').textContent = st ? `${st.name} ${st.enabled ? 'enabled' : 'disabled'} / ${st.configured ? (st.maskedApiKey || 'key saved') : 'no key saved'}` : 'No exchange configured';
-  $('exchange-key-state').className = st?.enabled && st?.configured ? 'pos' : 'muted';
-}
 async function loadState () { applyState(await api('/api/utbot/state')); }
 async function saveSettings () {
   try { const data = await api('/api/utbot/settings', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(settings()) }); applyState(data.state); addLog('success', 'UT Bot settings saved.'); }
@@ -394,21 +376,26 @@ function renderPositions (data = {}) {
   setPnlMetric('pos-open-pnl', openPnl);
   setPnlMetric('pos-closed-pnl', closedPnl);
   setPnlMetric('pos-net-pnl', openPnl + closedPnl);
-  const delta = data.delta || {};
-  $('positions-delta-pill').textContent = delta.enabled ? `DELTA ON ${delta.productSymbol || ''}` : 'DELTA OFF';
-  $('positions-delta-pill').className = `pill ${delta.enabled && !delta.lastError ? 'pos' : 'neg'}`;
   const running = Number(data.botStatus?.runningCount || 0);
   $('positions-bot-pill').textContent = running ? `BOTS ${running} LIVE` : 'BOTS STOPPED';
-  $('positions-updated-at').textContent = `${data.source === 'delta' ? 'Exchange synced' : 'Local data'} ${new Date().toLocaleTimeString()}`;
+  $('positions-updated-at').textContent = `Local data ${new Date().toLocaleTimeString()}`;
   $('positions-open-body').innerHTML = openRows.length ? openRows.map(p => `<tr><td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td><td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${Number(p.size || p.qty || 0).toFixed(0)}</td><td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td><td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="10" class="muted">No open positions.</td></tr>';
   $('positions-closed-sub').textContent = `${closed.length} closed`;
   $('positions-closed-body').innerHTML = closed.length ? closed.map(t => `<tr><td>${badge('closed','closed')}</td><td>${esc(t.strategyName || '--')}</td><td>${badge(t.type,t.type)}</td><td>${fmtUSD(t.entry)}</td><td>${fmtUSD(t.exit)}</td><td>${Number(t.size || t.qty || 0).toFixed(0)}</td><td class="${pnlCls(t.pnl)}">${fmtUSD(t.pnl)}</td><td class="${pnlCls(t.pnlPct)}">${fmtPct(t.pnlPct)}</td><td>${esc(t.reason || '--')}</td><td>${fmtTime(t.exitTime)}</td><td>${esc(t.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="11" class="muted">No closed positions.</td></tr>';
-  const orders = data.exchangeOrders || [];
-  $('positions-orders-body').innerHTML = orders.length ? orders.map(o => `<tr><td class="${o.status === 'sent' ? 'pos' : (o.status === 'failed' ? 'neg' : 'warn')}">${esc(String(o.status || '--').toUpperCase())}</td><td>${esc(o.action || '--')}</td><td>${esc(o.strategyName || o.runnerId || '--')}</td><td>${esc(o.side || '--')}</td><td>${esc(o.productSymbol || '--')}</td><td>${Number(o.size || 0).toFixed(0)}</td><td>${Number(o.requestedQty || 0).toFixed(6)}</td><td class="neg">${esc(o.error || '')}</td><td>${fmtTime(o.createdAt)}</td></tr>`).join('') : '<tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr>';
 }
 async function loadPositions (forced = false) { renderPositions(await api(`/api/positions?runnerId=utbot&limit=1000${forced ? '&force=1' : ''}`)); }
+async function resetAllPaperData () {
+  if (!confirm('Delete all paper positions, trades, and P&L history? This will stop running paper bots and reset all sessions.')) return;
+  try {
+    await api('/api/positions/reset-all', { method:'POST' });
+    await loadState();
+    await loadPositions(false);
+    addLog('warn', 'All paper positions, trades, and P&L were deleted.');
+  } catch (err) {
+    addLog('error', `Delete all failed: ${err.message}`);
+  }
+}
 async function loadInitial () {
-  await loadExchanges().catch(err => addLog('error', `Exchange load failed: ${err.message}`));
   await loadState().catch(err => addLog('error', `UT Bot load failed: ${err.message}`));
   const candles = await api('/api/candles').catch(() => []);
   if (Array.isArray(candles)) renderCandles(candles);
@@ -432,7 +419,6 @@ socket.on('utbot:runner_event', payload => {
   if (payload.event === 'position_opened') { addLog('success', `UT Bot opened ${payload.data?.type || ''}.`); loadPositions(true).catch(() => {}); }
   if (payload.event === 'trade_closed') { addLog(payload.data?.pnl >= 0 ? 'success' : 'warn', `UT Bot closed ${fmtUSD(payload.data?.pnl)}.`); loadPositions(true).catch(() => {}); }
 });
-socket.on('exchange:sync', () => loadPositions(false).catch(() => {}));
 socket.on('log', l => { const id = String(l.strategyId || l.strategy || ''); if (!id || id === 'utbot') addLog(l.level || 'info', l.msg || ''); });
 socket.on('connect', () => addLog('success', 'Connected to server.'));
 socket.on('disconnect', () => addLog('error', 'Disconnected from server.'));
