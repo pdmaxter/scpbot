@@ -129,6 +129,24 @@ const allInOneStrategySchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  UTBotConfig — settings for the dedicated UT Bot Alerts strategy page
+// ─────────────────────────────────────────────────────────────────────────────
+const utBotConfigSchema = new mongoose.Schema({
+  key:      { type: String, default: 'utbot', unique: true, index: true },
+  name:     { type: String, default: 'UT Bot Alerts' },
+  timeframe:{ type: String, default: '5m' },
+  capital:  { type: Number, default: 1000 },
+  keyValue: { type: Number, default: 1 },
+  atrPeriod:{ type: Number, default: 10 },
+  useHeikinAshi: { type: Boolean, default: false },
+  buyFeePct: { type: Number, default: 0 },
+  sellFeePct: { type: Number, default: 0 },
+  exchangeEnabled: { type: Boolean, default: false },
+  exchangeProvider: { type: String, default: 'delta-demo' },
+  isActive: { type: Boolean, default: false, index: true },
+}, { timestamps: true });
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  ExchangeOrder — audit log for broker/demo exchange orders mirrored from bots
 // ─────────────────────────────────────────────────────────────────────────────
 const exchangeOrderSchema = new mongoose.Schema({
@@ -179,6 +197,7 @@ module.exports = {
   Position:  mongoose.model('BotPosition',  positionSchema),
   PineScriptConfig: mongoose.model('PineScriptConfig', pineScriptSchema),
   AllInOneStrategyConfig: mongoose.model('AllInOneStrategyConfig', allInOneStrategySchema),
+  UTBotConfig: mongoose.model('UTBotConfig', utBotConfigSchema),
   ExchangeOrder: mongoose.model('ExchangeOrder', exchangeOrderSchema),
   ExchangeCredential: mongoose.model('ExchangeCredential', exchangeCredentialSchema),
 };

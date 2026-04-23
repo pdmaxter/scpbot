@@ -15,6 +15,10 @@ const EQUITY_SNAP_EVERY = 5;
 
 const utcDate = ts => new Date(ts).toISOString().slice(0, 10);
 const today   = ()  => new Date().toISOString().slice(0, 10);
+const strategyRiskPct = strategy => {
+  const pct = Number(strategy?.riskPerTrade) * 100;
+  return Number.isFinite(pct) ? pct : 0;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  StrategyRunner — wraps one strategy instance with independent lifecycle
@@ -167,7 +171,7 @@ class StrategyRunner {
         executionMode:     this.executionEnabled ? 'delta-demo' : 'paper',
         initialCapital:    s.initialCapital,
         currentCapital:    s.capital,
-        riskPerTradePct:   s.riskPerTrade * 100,
+        riskPerTradePct:   strategyRiskPct(s),
         dailyStartCapital: s.capital,
         currentDate:       today(),
       });
@@ -263,7 +267,7 @@ class StrategyRunner {
     const s = this.strategy;
     s.capital         = sess.currentCapital;
     s.initialCapital  = sess.initialCapital;
-    if (sess.riskPerTradePct) s.riskPerTrade = sess.riskPerTradePct / 100;
+    if (sess.riskPerTradePct && s.riskPerTrade !== undefined) s.riskPerTrade = sess.riskPerTradePct / 100;
 
     const dbTrades = await Trade.find({ sessionId: sess._id }).sort({ entryTime: 1 }).lean();
     s.trades = dbTrades.map(t => ({

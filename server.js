@@ -9,13 +9,14 @@ const path       = require('path');
 const crypto     = require('crypto');
 
 const db                                      = require('./db');
-const { Session, PineScriptConfig, AllInOneStrategyConfig, Trade, Position, ExchangeOrder, ExchangeCredential } = db;
+const { Session, PineScriptConfig, AllInOneStrategyConfig, UTBotConfig, Trade, Position, ExchangeOrder, ExchangeCredential } = db;
 const { BotManager, StrategyRunner }         = require('./bot-manager');
 const { ScalpingStrategy }                   = require('./strategies/scalping');
 const { RangeBreakoutStrategy }              = require('./strategies/breakout');
 const { HeikenAshiSupertrendStrategy }       = require('./strategies/heikenashi_supertrend');
 const { PineScriptStrategy }                 = require('./strategies/pine_adapter');
 const { AllInOneStrategy, ALL_IN_ONE_DEFINITIONS, TIMEFRAME_MS } = require('./strategies/all_in_one');
+const { UTBotStrategy }                      = require('./strategies/ut_bot');
 const { DeltaDemoClient }                    = require('./delta-exchange');
 
 const SYMBOL_REST = 'BTCUSDT';
@@ -198,6 +199,7 @@ const breakoutRunner = new StrategyRunner('breakout',    new RangeBreakoutStrate
 const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertrendStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { executionAdapter: deltaClient, displayName: 'Heikin-Ashi SuperTrend', onExchangeOrder: queueExchangeOrderSync });
 const pineRunners    = new Map(); // scriptId -> StrategyRunner
 const allInOneRunners = new Map(); // strategyKey -> StrategyRunner
+let utBotRunner = null;
 const EXCHANGE_SYNC_INTERVAL_MS = 30 * 1000;
 const STRATEGY_WATCHDOG_INTERVAL_MS = 30 * 1000;
 let exchangeSyncTimer = null;
@@ -620,6 +622,151 @@ async function emitAllInOneState () {
   io.emit('all_status', manager.allStatus());
 }
 
+function utBotDefaultConfig () {
+  return {
+    key: 'utbot',
+    name: 'UT Bot Alerts',
+    timeframe: '5m',
+    capital: 1000,
+    keyValue: 1,
+    atrPeriod: 10,
+    useHeikinAshi: false,
+    buyFeePct: 0,
+    sellFeePct: 0,
+    exchangeEnabled: false,
+    exchangeProvider: 'delta-demo',
+    isActive: false,
+  };
+}
+
+async function ensureUTBotConfig () {
+  const defaults = utBotDefaultConfig();
+  delete defaults.name;
+  await UTBotConfig.updateOne(
+    { key: 'utbot' },
+    { $setOnInsert: defaults, $set: { name: 'UT Bot Alerts' } },
+    { upsert: true }
+  );
+  return UTBotConfig.findOne({ key: 'utbot' });
+}
+
+function applyUTBotRuntimeOptions (doc, body = {}) {
+  if (body.timeframe !== undefined && TIMEFRAME_MS[String(body.timeframe)]) doc.timeframe = String(body.timeframe);
+  if (body.capital !== undefined) doc.capital = Math.max(100, Number(body.capital) || doc.capital || 1000);
+  if (body.keyValue !== undefined) doc.keyValue = Math.max(0.1, Number(body.keyValue) || 1);
+  if (body.atrPeriod !== undefined) doc.atrPeriod = Math.max(2, Math.round(Number(body.atrPeriod) || 10));
+  if (body.useHeikinAshi !== undefined) doc.useHeikinAshi = Boolean(body.useHeikinAshi);
+  if (body.buyFeePct !== undefined) doc.buyFeePct = Math.max(0, Number(body.buyFeePct) || 0);
+  if (body.sellFeePct !== undefined) doc.sellFeePct = Math.max(0, Number(body.sellFeePct) || 0);
+  if (body.exchangeEnabled !== undefined) doc.exchangeEnabled = Boolean(body.exchangeEnabled);
+  if (body.exchangeProvider !== undefined && providerMeta(String(body.exchangeProvider))) doc.exchangeProvider = String(body.exchangeProvider);
+  if (!doc.exchangeProvider) doc.exchangeProvider = 'delta-demo';
+}
+
+function utBotStrategyOptions (doc) {
+  return {
+    timeframe: doc.timeframe || '5m',
+    capital: doc.capital || 1000,
+    keyValue: doc.keyValue || 1,
+    atrPeriod: doc.atrPeriod || 10,
+    useHeikinAshi: Boolean(doc.useHeikinAshi),
+    buyFeePct: doc.buyFeePct || 0,
+    sellFeePct: doc.sellFeePct || 0,
+  };
+}
+
+function utBotConfigView (doc) {
+  return {
+    key: 'utbot',
+    name: doc.name || 'UT Bot Alerts',
+    timeframe: doc.timeframe || '5m',
+    capital: doc.capital || 1000,
+    keyValue: doc.keyValue || 1,
+    atrPeriod: doc.atrPeriod || 10,
+    useHeikinAshi: Boolean(doc.useHeikinAshi),
+    buyFeePct: doc.buyFeePct || 0,
+    sellFeePct: doc.sellFeePct || 0,
+    exchangeEnabled: Boolean(doc.exchangeEnabled),
+    exchangeProvider: doc.exchangeProvider || 'delta-demo',
+    isActive: Boolean(doc.isActive),
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function utBotAggregateStatus () {
+  const running = Boolean(utBotRunner?.running);
+  return {
+    id: 'utbot',
+    running,
+    paused: Boolean(utBotRunner?.paused),
+    warmedUp: Boolean(utBotRunner?.strategy?.warmedUp),
+    runningCount: running ? 1 : 0,
+  };
+}
+
+async function utBotSnapshot (doc) {
+  const runner = utBotRunner;
+  return {
+    ...utBotConfigView(doc),
+    runnerId: 'utbot',
+    status: runner?._status() || { id: 'utbot', running: false, paused: false, warmedUp: false },
+    session: runner ? await runner.buildSessionInfo().catch(() => null) : null,
+    stats: runner ? runner.strategy.getFullState() : null,
+  };
+}
+
+async function emitUTBotState () {
+  const doc = await ensureUTBotConfig();
+  io.emit('utbot:status', utBotAggregateStatus());
+  io.emit('utbot:state', await utBotSnapshot(doc));
+  io.emit('all_status', manager.allStatus());
+}
+
+function hookUTBotRunnerEvents (runner) {
+  if (runner._utBotHooked) return;
+  runner._utBotHooked = true;
+  const rawEmit = runner.emit.bind(runner);
+  runner.emit = (event, data) => {
+    rawEmit(event, data);
+    io.emit('utbot:runner_event', {
+      runnerId: runner.id,
+      event,
+      data,
+      status: runner._status(),
+      stats: runner.strategy.getFullState(),
+    });
+    if (['status', 'stats', 'session_info', 'position_opened', 'trade_closed', 'warmed_up'].includes(event)) {
+      emitUTBotState().catch(e => console.error('[UTBOT] emit state failed:', e.message));
+    }
+  };
+}
+
+function ensureUTBotRunner (doc) {
+  if (!utBotRunner) {
+    utBotRunner = new StrategyRunner(
+      'utbot',
+      new UTBotStrategy(utBotStrategyOptions(doc)),
+      io,
+      {
+        sessionStrategyType: 'utbot',
+        displayName: 'UT Bot Alerts',
+        executionAdapter: deltaClient,
+        executionEnabled: Boolean(doc.exchangeEnabled),
+        onExchangeOrder: queueExchangeOrderSync,
+      }
+    );
+    manager.addRunner(utBotRunner);
+    hookUTBotRunnerEvents(utBotRunner);
+    utBotRunner.wire();
+  } else {
+    utBotRunner.executionEnabled = Boolean(doc.exchangeEnabled);
+    utBotRunner.displayName = 'UT Bot Alerts';
+    if (!utBotRunner.running) utBotRunner.strategy.reset(utBotStrategyOptions(doc));
+    utBotRunner.wire();
+  }
+  return utBotRunner;
+}
+
 function hookAllInOneRunnerEvents (runner, key) {
   if (runner._allInOneHooked) return;
   runner._allInOneHooked = true;
@@ -674,6 +821,7 @@ const STRATEGY_LABELS = {
   breakout: 'Range Breakout',
   heikenashi: 'Heikin-Ashi SuperTrend',
   pine: 'Pine Strategy',
+  utbot: 'UT Bot Alerts',
 };
 
 function idString (value) {
@@ -1692,6 +1840,66 @@ app.post('/api/allinone/strategies/:key/reset', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/utbot/state', async (_req, res) => {
+  try {
+    const doc = await ensureUTBotConfig();
+    ensureUTBotRunner(doc);
+    res.json(await utBotSnapshot(doc));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/utbot/settings', async (req, res) => {
+  try {
+    const doc = await ensureUTBotConfig();
+    applyUTBotRuntimeOptions(doc, req.body || {});
+    await doc.save();
+    const runner = ensureUTBotRunner(doc);
+    runner.executionEnabled = Boolean(doc.exchangeEnabled);
+    if (!runner.running) await runner.reset(utBotStrategyOptions(doc));
+    await emitUTBotState();
+    res.json({ ok: true, state: await utBotSnapshot(doc) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/utbot/start', async (req, res) => {
+  try {
+    const doc = await ensureUTBotConfig();
+    applyUTBotRuntimeOptions(doc, req.body || {});
+    doc.isActive = true;
+    await doc.save();
+    const runner = ensureUTBotRunner(doc);
+    runner.executionEnabled = Boolean(doc.exchangeEnabled);
+    if (req.body && Object.keys(req.body).length) await runner.reset(utBotStrategyOptions(doc));
+    await startRunner(runner, { createNew: false });
+    await emitUTBotState();
+    res.json({ ok: true, runnerId: runner.id, sessionId: runner.sessionId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/utbot/stop', async (_req, res) => {
+  try {
+    if (!utBotRunner) return res.status(404).json({ error: 'UT Bot runner not found' });
+    await utBotRunner.stop();
+    manager.maybeStopWs();
+    await emitUTBotState();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/utbot/reset', async (req, res) => {
+  try {
+    const doc = await ensureUTBotConfig();
+    applyUTBotRuntimeOptions(doc, req.body || {});
+    await doc.save();
+    const runner = ensureUTBotRunner(doc);
+    await runner.reset(utBotStrategyOptions(doc));
+    manager.maybeStopWs();
+    await emitUTBotState();
+    await manager.sendSessionsList(io);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/sessions', async (_req, res) => {
   try {
     const list = await Session.find().sort({ createdAt: -1 }).limit(40).lean();
@@ -1720,9 +1928,11 @@ io.on('connection', async socket => {
   socket.emit('pine:scripts', await listPineScriptsDetailed());
   socket.emit('allinone:status', allInOneAggregateStatus());
   socket.emit('allinone:runners', await listAllInOneDetailed());
+  socket.emit('utbot:status', utBotAggregateStatus());
+  socket.emit('utbot:state', await utBotSnapshot(await ensureUTBotConfig()));
   socket.emit('log', {
     level: 'info',
-    msg: `👋 Dashboard connected — EMA: ${scalpRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Breakout: ${breakoutRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | HA: ${haRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Pine bots: ${pineAggregateStatus().runningCount} running | All-in-One: ${allInOneAggregateStatus().runningCount} running`,
+    msg: `👋 Dashboard connected — EMA: ${scalpRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Breakout: ${breakoutRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | HA: ${haRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Pine bots: ${pineAggregateStatus().runningCount} running | All-in-One: ${allInOneAggregateStatus().runningCount} running | UT Bot: ${utBotAggregateStatus().running ? 'RUNNING' : 'STOPPED'}`,
     time: Date.now(),
   });
 });
@@ -1735,6 +1945,13 @@ async function bootstrap () {
   catch (e) { console.error('[FATAL] MongoDB:', e.message); process.exit(1); }
   await applySavedExchangeCredentials();
   await ensureAllInOneConfigs();
+  const utDoc = await ensureUTBotConfig();
+  const restoredUTRunner = ensureUTBotRunner(utDoc);
+  const savedUT = await restoredUTRunner.restoreFromDB();
+  if (savedUT && savedUT.isRunning) {
+    console.log('[Boot] Auto-resuming utbot (UT Bot Alerts)...');
+    await startRunner(restoredUTRunner, { createNew: false });
+  }
 
   const allInOneDocs = await AllInOneStrategyConfig.find().lean().catch(() => []);
   for (const doc of allInOneDocs) {
