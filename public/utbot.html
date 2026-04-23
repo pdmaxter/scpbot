@@ -350,7 +350,7 @@ function renderPositions (data = {}) {
   const orders = data.exchangeOrders || [];
   $('positions-orders-body').innerHTML = orders.length ? orders.map(o => `<tr><td class="${o.status === 'sent' ? 'pos' : (o.status === 'failed' ? 'neg' : 'warn')}">${esc(String(o.status || '--').toUpperCase())}</td><td>${esc(o.action || '--')}</td><td>${esc(o.strategyName || o.runnerId || '--')}</td><td>${esc(o.side || '--')}</td><td>${esc(o.productSymbol || '--')}</td><td>${Number(o.size || 0).toFixed(0)}</td><td>${Number(o.requestedQty || 0).toFixed(6)}</td><td class="neg">${esc(o.error || '')}</td><td>${fmtTime(o.createdAt)}</td></tr>`).join('') : '<tr><td colspan="9" class="muted">No Delta demo orders yet.</td></tr>';
 }
-async function loadPositions (forced = false) { renderPositions(await api(`/api/positions?limit=1000${forced ? '&force=1' : ''}`)); }
+async function loadPositions (forced = false) { renderPositions(await api(`/api/positions?runnerId=utbot&limit=1000${forced ? '&force=1' : ''}`)); }
 async function loadInitial () {
   await loadExchanges().catch(err => addLog('error', `Exchange load failed: ${err.message}`));
   await loadState().catch(err => addLog('error', `UT Bot load failed: ${err.message}`));

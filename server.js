@@ -1173,7 +1173,9 @@ app.post('/api/exchanges/:provider', async (req, res) => {
 app.get('/api/positions', async (req, res) => {
   try {
     const requestedPineId = req.query.pineScriptId ? String(req.query.pineScriptId) : null;
-    const requestedRunnerId = requestedPineId ? pineRunnerId(requestedPineId) : null;
+    const directRunnerId = req.query.runnerId ? String(req.query.runnerId) : null;
+    const requestedRunnerId = directRunnerId || (requestedPineId ? pineRunnerId(requestedPineId) : null);
+    const scopeTopLevelToRunner = Boolean(directRunnerId);
     const fromMs = req.query.fromDate ? Date.parse(req.query.fromDate) : null;
     const toMs = req.query.toDate ? Date.parse(req.query.toDate) : null;
     const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000);
@@ -1232,6 +1234,7 @@ app.get('/api/positions', async (req, res) => {
         const selectedOpenAudit = requestedRunnerId
           ? exchangeOrders.find(o => o.action === 'open' && o.status === 'sent' && o.runnerId === requestedRunnerId)
           : null;
+        const defaultOpenAudit = requestedRunnerId ? selectedOpenAudit : lastOpenAudit;
         const enrichTrade = trade => {
           const audit = auditForFill(trade.exchange?.openFill) || auditForFill(trade.exchange?.closeFill);
           return {
@@ -1244,26 +1247,31 @@ app.get('/api/positions', async (req, res) => {
         };
         const open = deltaSync.positions.map(p => ({
           ...p,
-          strategyName: selectedOpenAudit?.strategyName || lastOpenAudit?.strategyName || p.strategyName,
-          strategyType: selectedOpenAudit?.strategyType || lastOpenAudit?.strategyType || p.strategyType,
-          runnerId: selectedOpenAudit?.runnerId || lastOpenAudit?.runnerId || p.runnerId,
-          pineScriptId: idString(selectedOpenAudit?.pineScriptId || lastOpenAudit?.pineScriptId) || null,
-          shortId: idString(selectedOpenAudit?.sessionId || lastOpenAudit?.sessionId)?.slice(-6).toUpperCase() || null,
+          strategyName: defaultOpenAudit?.strategyName || p.strategyName,
+          strategyType: defaultOpenAudit?.strategyType || p.strategyType,
+          runnerId: defaultOpenAudit?.runnerId || p.runnerId,
+          pineScriptId: idString(defaultOpenAudit?.pineScriptId) || null,
+          shortId: idString(defaultOpenAudit?.sessionId)?.slice(-6).toUpperCase() || null,
           markPrice: p.markPrice || markPrice,
         }));
         const closed = deltaSync.trades.map(enrichTrade);
         const selectedClosed = requestedRunnerId ? closed.filter(t => t.runnerId === requestedRunnerId) : closed;
         const selectedOpen = requestedRunnerId ? open.filter(p => p.runnerId === requestedRunnerId) : open;
+        const visibleOpen = scopeTopLevelToRunner ? selectedOpen : open;
+        const visibleClosed = scopeTopLevelToRunner ? selectedClosed : closed;
+        const visibleExchangeOrders = scopeTopLevelToRunner ? exchangeOrders.filter(o => o.runnerId === requestedRunnerId) : exchangeOrders;
         const selectedOpenPnl = selectedOpen.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0);
         const selectedClosedPnl = selectedClosed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
+        const visibleOpenPnl = visibleOpen.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0);
+        const visibleClosedPnl = visibleClosed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
         return res.json({
           markPrice,
           summary: {
-            openCount: open.length,
-            closedCount: closed.length,
-            openPnl: open.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0),
-            closedPnl: closed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0),
-            netPnl: open.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0) + closed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0),
+            openCount: visibleOpen.length,
+            closedCount: visibleClosed.length,
+            openPnl: visibleOpenPnl,
+            closedPnl: visibleClosedPnl,
+            netPnl: visibleOpenPnl + visibleClosedPnl,
           },
           source: 'delta',
           selected: requestedRunnerId ? {
@@ -1281,9 +1289,9 @@ app.get('/api/positions', async (req, res) => {
           } : null,
           botStatus,
           delta: { ...deltaClient.status(), lastSyncAt: deltaSync.syncedAt, syncErrors: deltaSync.errors, backendSync: backendExchangeSyncStatus() },
-          open,
-          closed,
-          exchangeOrders: exchangeOrders.map(o => ({
+          open: visibleOpen,
+          closed: visibleClosed,
+          exchangeOrders: visibleExchangeOrders.map(o => ({
             id: idString(o._id),
             provider: o.provider,
             action: o.action,
@@ -1357,24 +1365,44 @@ app.get('/api/positions', async (req, res) => {
       };
     });
 
-    const openPnl = open.reduce((sum, p) => sum + (Number.isFinite(p.pnl) ? p.pnl : 0), 0);
-    const closedPnl = closed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
+    const selectedOpen = requestedRunnerId ? open.filter(p => p.runnerId === requestedRunnerId) : open;
+    const selectedClosed = requestedRunnerId ? closed.filter(t => t.runnerId === requestedRunnerId) : closed;
+    const visibleOpen = scopeTopLevelToRunner ? selectedOpen : open;
+    const visibleClosed = scopeTopLevelToRunner ? selectedClosed : closed;
+    const visibleExchangeOrders = scopeTopLevelToRunner ? exchangeOrders.filter(o => o.runnerId === requestedRunnerId) : exchangeOrders;
+    const openPnl = visibleOpen.reduce((sum, p) => sum + (Number.isFinite(p.pnl) ? p.pnl : 0), 0);
+    const closedPnl = visibleClosed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
+    const selectedOpenPnl = selectedOpen.reduce((sum, p) => sum + (Number.isFinite(p.pnl) ? p.pnl : 0), 0);
+    const selectedClosedPnl = selectedClosed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
 
     res.json({
       markPrice,
       summary: {
-        openCount: open.length,
-        closedCount: closed.length,
+        openCount: visibleOpen.length,
+        closedCount: visibleClosed.length,
         openPnl,
         closedPnl,
         netPnl: openPnl + closedPnl,
       },
       source: 'local',
+      selected: requestedRunnerId ? {
+        runnerId: requestedRunnerId,
+        pineScriptId: requestedPineId,
+        open: selectedOpen,
+        closed: selectedClosed,
+        summary: {
+          openCount: selectedOpen.length,
+          closedCount: selectedClosed.length,
+          openPnl: selectedOpenPnl,
+          closedPnl: selectedClosedPnl,
+          netPnl: selectedOpenPnl + selectedClosedPnl,
+        },
+      } : null,
       botStatus,
       delta: { ...deltaClient.status(), backendSync: backendExchangeSyncStatus() },
-      open,
-      closed,
-      exchangeOrders: exchangeOrders.map(o => ({
+      open: visibleOpen,
+      closed: visibleClosed,
+      exchangeOrders: visibleExchangeOrders.map(o => ({
         id: idString(o._id),
         provider: o.provider,
         action: o.action,
