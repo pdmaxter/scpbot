@@ -8,8 +8,8 @@
 <script src="/socket.io/socket.io.js"></script>
 <style>
 :root {
-  --bg:      #0b0d14; --panel:  #12141f; --panel2: #181a28;
-  --border:  #252840; --text:   #c9cde0; --muted:  #5a6080;
+  --bg:      #f5f7fb; --panel:  #ffffff; --panel2: #f7f9fc;
+  --border:  #d9e0ea; --text:   #182230; --muted:  #667085;
   --green:   #00e676; --red:    #ff3d57; --blue:   #2979ff;
   --orange:  #ff9100; --purple: #ce93d8; --yellow: #ffd740;
   --teal:    #00bcd4; --pink:   #f48fb1;
@@ -60,7 +60,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .btn-stop{background:var(--red);color:#fff;}
 .btn-pause{background:#ffd74022;color:var(--yellow);border:1px solid #ffd74040;}
 .btn-resume{background:#00e67622;color:var(--green);border:1px solid #00e67640;}
-.btn-reset{background:#5a608020;color:var(--muted);border:1px solid var(--border);}
+.btn-reset{background:#66708520;color:var(--muted);border:1px solid var(--border);}
 .btn-new{background:#2979ff22;color:var(--blue);border:1px solid #2979ff44;}
 .btn:hover{opacity:.82;}
 .btn:disabled{opacity:.3;cursor:not-allowed;}
@@ -114,9 +114,9 @@ tr:last-child td{border-bottom:none;}
 .badge-short{background:#ff3d5718;color:var(--red);}
 .badge-tp{background:#2979ff18;color:var(--blue);}
 .badge-sl{background:#ff910018;color:var(--orange);}
-.badge-misc{background:#25284018;color:var(--muted);}
+.badge-misc{background:#d9e0ea18;color:var(--muted);}
 .badge-active{background:#00e67618;color:var(--green);}
-.badge-inactive{background:#5a608018;color:var(--muted);}
+.badge-inactive{background:#66708518;color:var(--muted);}
 .badge-scalp{background:#2979ff18;color:var(--blue);}
 .badge-break{background:#00bcd418;color:var(--teal);}
 .badge-ha{background:#ce93d818;color:var(--purple);}
@@ -159,7 +159,7 @@ tr:last-child td{border-bottom:none;}
 .script-list{max-height:120px;overflow-y:auto;border:1px solid var(--border);background:var(--panel2);border-radius:4px;margin-top:8px;}
 .script-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:7px 8px;border-bottom:1px solid var(--border);cursor:pointer;font-size:11px;}
 .script-row:last-child{border-bottom:none;}
-.script-row:hover,.script-row.active{background:#202335;}
+.script-row:hover,.script-row.active{background:#edf2f7;}
 .script-row-name{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .script-row-meta{color:var(--muted);font-size:10px;}
 .report-box{margin-top:8px;background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11px;}
@@ -167,7 +167,7 @@ tr:last-child td{border-bottom:none;}
 .report-item{background:var(--panel);border-radius:4px;padding:5px 7px;}
 .report-label{color:var(--muted);font-size:10px;}
 .report-value{font-weight:800;font-variant-numeric:tabular-nums;margin-top:1px;}
-.modal-backdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#05070bcc;z-index:100;padding:20px;}
+.modal-backdrop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0f172a24;z-index:100;padding:20px;}
 .modal-backdrop.open{display:flex;}
 .modal{width:min(760px,100%);max-height:88vh;background:var(--panel);border:1px solid var(--border);border-radius:6px;box-shadow:0 18px 60px #0008;display:flex;flex-direction:column;overflow:hidden;}
 .modal-head{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);}
@@ -228,7 +228,7 @@ tr:last-child td{border-bottom:none;}
     <a class="nav-btn" href="/pine.html" title="Open Pine Upload Bot page">PINE PAGE</a>
     <a class="nav-btn" href="/positions.html" title="Open positions ledger">POSITIONS</a>
     <form method="POST" action="/logout" style="margin:0">
-      <button type="submit" style="background:#25284080;border:1px solid var(--border);color:var(--muted);padding:3px 9px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;letter-spacing:.04em;" title="Sign out">⎋ LOGOUT</button>
+      <button type="submit" style="background:#d9e0ea80;border:1px solid var(--border);color:var(--muted);padding:3px 9px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;letter-spacing:.04em;" title="Sign out">⎋ LOGOUT</button>
     </form>
   </div>
 </header>
@@ -583,11 +583,11 @@ const pfx = id => STRAT_META[id]?.pfx || id;
 //  Charts
 // ═══════════════════════════════════════════════════════════════════
 const LC_THEME = {
-  layout:   { background:{ color:'#0b0d14' }, textColor:'#8892b0' },
-  grid:     { vertLines:{ color:'#181a28' }, horzLines:{ color:'#181a28' } },
+  layout:   { background:{ color:'#f5f7fb' }, textColor:'#667085' },
+  grid:     { vertLines:{ color:'#f7f9fc' }, horzLines:{ color:'#f7f9fc' } },
   crosshair:{ mode: LightweightCharts.CrosshairMode.Normal },
-  rightPriceScale: { borderColor:'#252840' },
-  timeScale: { borderColor:'#252840', timeVisible:true, secondsVisible:false, rightOffset:8, barSpacing:6 },
+  rightPriceScale: { borderColor:'#d9e0ea' },
+  timeScale: { borderColor:'#d9e0ea', timeVisible:true, secondsVisible:false, rightOffset:8, barSpacing:6 },
 };
 
 let priceChart, rsiChart, volChart;
@@ -609,14 +609,14 @@ function initCharts () {
 
   rsiChart = LightweightCharts.createChart($('rsi-chart'), { ...LC_THEME,
     width: $('rsi-chart').clientWidth, height: $('rsi-chart').clientHeight || 96,
-    rightPriceScale:{ scaleMargins:{top:.05,bottom:.05}, borderColor:'#252840' } });
+    rightPriceScale:{ scaleMargins:{top:.05,bottom:.05}, borderColor:'#d9e0ea' } });
   rsiSeries = rsiChart.addLineSeries({ color:'#ce93d8', lineWidth:1, priceLineVisible:false, lastValueVisible:true });
   rsiSeries.createPriceLine({ price:70, color:'#ff3d5780', lineWidth:1, lineStyle:2, axisLabelVisible:true, title:'OB' });
   rsiSeries.createPriceLine({ price:30, color:'#00e67680', lineWidth:1, lineStyle:2, axisLabelVisible:true, title:'OS' });
 
   volChart = LightweightCharts.createChart($('vol-chart'), { ...LC_THEME,
     width: $('vol-chart').clientWidth, height: $('vol-chart').clientHeight || 76,
-    rightPriceScale:{ scaleMargins:{top:.1,bottom:0}, borderColor:'#252840' } });
+    rightPriceScale:{ scaleMargins:{top:.1,bottom:0}, borderColor:'#d9e0ea' } });
   volSeries = volChart.addHistogramSeries({ color:'#2979ff30', priceFormat:{type:'volume'}, priceLineVisible:false });
 
   // Equity mini-charts

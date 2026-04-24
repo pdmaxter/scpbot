@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PNL Dashboard</title>
 <style>
-:root{--bg:#0b0d14;--panel:#12141f;--panel2:#181a28;--line:#252840;--text:#c9cde0;--muted:#6a708f;--green:#00e676;--red:#ff3d57;--blue:#2979ff;--yellow:#ffd740;--font:'Segoe UI',system-ui,sans-serif}
+:root{--bg:#f5f7fb;--panel:#ffffff;--panel2:#f7f9fc;--line:#d9e0ea;--text:#182230;--muted:#667085;--green:#00e676;--red:#ff3d57;--blue:#2979ff;--yellow:#ffd740;--font:'Segoe UI',system-ui,sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
 .page{min-height:100vh;display:grid;grid-template-rows:56px 1fr}
@@ -16,7 +16,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var
 .pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.04em;color:var(--muted)}
 .pill.mode{background:#ffd74018;border-color:#ffd74044;color:var(--yellow)}
 .link-btn,.ghost-btn,.solid-btn{border-radius:4px;border:1px solid var(--line);padding:6px 10px;font-size:11px;font-weight:800;letter-spacing:.02em;text-decoration:none;cursor:pointer;white-space:nowrap}
-.link-btn{background:#2979ff18;color:var(--blue);border-color:#2979ff40}.ghost-btn{background:#25284080;color:var(--text)}.solid-btn{background:#00e676;color:#06120a;border-color:#00e676}
+.link-btn{background:#2979ff18;color:var(--blue);border-color:#2979ff40}.ghost-btn{background:#d9e0ea80;color:var(--text)}.solid-btn{background:#00e676;color:#06120a;border-color:#00e676}
 .main{padding:12px;max-width:1600px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:12px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
@@ -27,18 +27,18 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var
 .gridFilters{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:8px;align-items:end}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0}
 .label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:.04em;text-transform:uppercase}
-.inp{width:100%;background:#0d101a;border:1px solid var(--line);border-radius:4px;color:var(--text);font:inherit;padding:8px;outline:none}.inp:focus{border-color:var(--yellow)}
+.inp{width:100%;background:#ffffff;border:1px solid var(--line);border-radius:4px;color:var(--text);font:inherit;padding:8px;outline:none}.inp:focus{border-color:var(--yellow)}
 .metric{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:10px}
 .metric-label{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em}
 .metric-value{font-size:18px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
 .muted{color:var(--muted)}.pos{color:var(--green)}.neg{color:var(--red)}.warn{color:var(--yellow)}
 .table-wrap{overflow:auto;max-height:320px;border:1px solid var(--line);border-radius:4px;background:var(--panel2)}
 table{width:100%;border-collapse:collapse;font-size:11px}
-th{position:sticky;top:0;background:#151827;color:var(--muted);font-size:10px;text-align:left;padding:7px;border-bottom:1px solid var(--line);white-space:nowrap}
-td{padding:7px;border-bottom:1px solid #1d2032;white-space:nowrap}
+th{position:sticky;top:0;background:#f3f5f9;color:var(--muted);font-size:10px;text-align:left;padding:7px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px;border-bottom:1px solid #e5e7eb;white-space:nowrap}
 tr:last-child td{border-bottom:0}
 .badge{display:inline-flex;align-items:center;border-radius:3px;padding:2px 6px;font-size:10px;font-weight:900}
-.badge.live{background:#00e67618;color:var(--green)}.badge.off{background:#5a608018;color:var(--muted)}
+.badge.live{background:#00e67618;color:var(--green)}.badge.off{background:#66708518;color:var(--muted)}
 .badge.long{background:#00e67618;color:var(--green)}.badge.short{background:#ff3d5718;color:var(--red)}
 .section-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:12px}
 @media (max-width:1100px){.grid4,.grid5,.gridFilters{grid-template-columns:1fr 1fr}.section-grid{grid-template-columns:1fr}}
@@ -52,7 +52,7 @@ tr:last-child td{border-bottom:0}
     <div class="spacer"></div>
     <div class="status-strip">
       <span class="pill mode">ALL STRATEGIES</span>
-      <span class="pill" id="refresh-pill">Auto refresh 30s</span>
+      <span class="pill" id="refresh-pill">Auto refresh 5s</span>
       <a class="link-btn" href="/pine.html">Pine Upload</a>
       <a class="link-btn" href="/allinone.html">All-in-One</a>
       <a class="link-btn" href="/utbot.html">UT Bot</a>
@@ -151,7 +151,8 @@ tr:last-child td{border-bottom:0}
 <script>
 const $ = id => document.getElementById(id);
 let refreshTimer = null;
-let refreshTick = 30;
+const REFRESH_SECONDS = 5;
+let refreshTick = REFRESH_SECONDS;
 
 function esc (value) {
   return String(value ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m]));
@@ -283,7 +284,7 @@ async function loadOverview (manual = false) {
     renderDaily(data.dailyRows || []);
     renderOpen(data.open || []);
     renderClosed(data.closed || []);
-    if (manual) refreshTick = 30;
+    if (manual) refreshTick = REFRESH_SECONDS;
   } catch (err) {
     $('updated-at').textContent = `Load failed: ${err.message}`;
   }
@@ -293,7 +294,7 @@ function startRefresh () {
   refreshTimer = setInterval(() => {
     refreshTick -= 1;
     if (refreshTick <= 0) {
-      refreshTick = 30;
+      refreshTick = REFRESH_SECONDS;
       loadOverview(false);
     }
     $('refresh-pill').textContent = `Auto refresh ${refreshTick}s`;

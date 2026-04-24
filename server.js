@@ -413,17 +413,17 @@ const LOGIN_HTML = `<!DOCTYPE html>
 <title>BTC Bot — Sign In</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-body{background:#0b0d14;color:#c9cde0;font-family:'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;}
-.box{background:#12141f;border:1px solid #252840;border-radius:10px;padding:40px 36px;width:340px;}
+body{background:#f5f7fb;color:#182230;font-family:'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;}
+.box{background:#ffffff;border:1px solid #d9e0ea;border-radius:10px;padding:40px 36px;width:340px;}
 .logo{font-size:22px;font-weight:800;text-align:center;margin-bottom:28px;letter-spacing:-.01em;}
 .logo span{color:#ff9100;}
-label{display:block;font-size:11px;color:#5a6080;margin-bottom:4px;margin-top:14px;text-transform:uppercase;letter-spacing:.07em;}
-input{width:100%;background:#181a28;border:1px solid #252840;color:#c9cde0;padding:9px 12px;border-radius:5px;font-size:13px;outline:none;transition:.15s;}
+label{display:block;font-size:11px;color:#667085;margin-bottom:4px;margin-top:14px;text-transform:uppercase;letter-spacing:.07em;}
+input{width:100%;background:#f7f9fc;border:1px solid #d9e0ea;color:#182230;padding:9px 12px;border-radius:5px;font-size:13px;outline:none;transition:.15s;}
 input:focus{border-color:#2979ff;}
 .btn{margin-top:22px;width:100%;padding:10px;background:#2979ff;color:#fff;border:none;border-radius:5px;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.03em;transition:.15s;}
 .btn:hover{background:#1565c0;}
 .error{margin-top:14px;padding:8px 12px;background:#ff3d5718;border:1px solid #ff3d5730;border-radius:4px;color:#ff3d57;font-size:12px;text-align:center;}
-.note{margin-top:16px;font-size:10px;color:#5a6080;text-align:center;}
+.note{margin-top:16px;font-size:10px;color:#667085;text-align:center;}
 </style>
 </head>
 <body>

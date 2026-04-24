@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MT5 Connection</title>
 <style>
-:root{--bg:#0b0d14;--panel:#12141f;--panel2:#181a28;--line:#252840;--text:#c9cde0;--muted:#6a708f;--green:#00e676;--red:#ff3d57;--blue:#2979ff;--yellow:#ffd740;--font:'Segoe UI',system-ui,sans-serif}
+:root{--bg:#f5f7fb;--panel:#ffffff;--panel2:#f7f9fc;--line:#d9e0ea;--text:#182230;--muted:#667085;--green:#00e676;--red:#ff3d57;--blue:#2979ff;--yellow:#ffd740;--font:'Segoe UI',system-ui,sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
 .page{min-height:100vh;display:grid;grid-template-rows:56px 1fr}
@@ -16,7 +16,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var
 .pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.04em;color:var(--muted)}
 .pill.mode{background:#2979ff18;border-color:#2979ff44;color:var(--blue)}
 .link-btn,.ghost-btn,.solid-btn,.danger-btn{border-radius:4px;border:1px solid var(--line);padding:6px 10px;font-size:11px;font-weight:800;letter-spacing:.02em;text-decoration:none;cursor:pointer;white-space:nowrap}
-.link-btn{background:#2979ff18;color:var(--blue);border-color:#2979ff40}.ghost-btn{background:#25284080;color:var(--text)}.solid-btn{background:#00e676;color:#06120a;border-color:#00e676}.danger-btn{background:#ff3d57;color:#fff;border-color:#ff3d57}
+.link-btn{background:#2979ff18;color:var(--blue);border-color:#2979ff40}.ghost-btn{background:#d9e0ea80;color:var(--text)}.solid-btn{background:#00e676;color:#06120a;border-color:#00e676}.danger-btn{background:#ff3d57;color:#fff;border-color:#ff3d57}
 button:disabled{opacity:.35;cursor:not-allowed}
 .main{padding:12px;max-width:1120px;width:100%;margin:0 auto}
 .stack{display:flex;flex-direction:column;gap:12px}
@@ -27,13 +27,13 @@ button:disabled{opacity:.35;cursor:not-allowed}
 .muted{color:var(--muted)}.pos{color:var(--green)}.neg{color:var(--red)}.warn{color:var(--yellow)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid1{display:grid;grid-template-columns:1fr;gap:8px}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0}.label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:.04em;text-transform:uppercase}
-.inp{width:100%;background:#0d101a;border:1px solid var(--line);border-radius:4px;color:var(--text);font:inherit;padding:8px;outline:none}.inp:focus{border-color:var(--blue)}
-.check-row{display:flex;align-items:center;gap:8px;background:#0d101a;border:1px solid var(--line);border-radius:4px;padding:8px;color:var(--text);font-weight:800}.check-row input{width:16px;height:16px;accent-color:var(--green)}
+.inp{width:100%;background:#ffffff;border:1px solid var(--line);border-radius:4px;color:var(--text);font:inherit;padding:8px;outline:none}.inp:focus{border-color:var(--blue)}
+.check-row{display:flex;align-items:center;gap:8px;background:#ffffff;border:1px solid var(--line);border-radius:4px;padding:8px;color:var(--text);font-weight:800}.check-row input{width:16px;height:16px;accent-color:var(--green)}
 .status-card,.metric{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:10px}
 .metric-label{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em}.metric-value{font-size:16px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.log{height:220px;overflow:auto;background:#0d101a;border:1px solid var(--line);border-radius:4px}
-.log-line{display:grid;grid-template-columns:72px 1fr;gap:8px;padding:6px 8px;border-bottom:1px solid #1d2032;font-size:11px}.log-time{color:var(--muted)}
+.log{height:220px;overflow:auto;background:#ffffff;border:1px solid var(--line);border-radius:4px}
+.log-line{display:grid;grid-template-columns:72px 1fr;gap:8px;padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:11px}.log-time{color:var(--muted)}
 @media (max-width:720px){.header{position:static;align-items:flex-start;padding:12px;flex-wrap:wrap}.grid2{grid-template-columns:1fr}}
 </style>
 </head>
