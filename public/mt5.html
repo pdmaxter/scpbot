@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MT5 Connection</title>
+<style>
+:root{--bg:#0b0d14;--panel:#12141f;--panel2:#181a28;--line:#252840;--text:#c9cde0;--muted:#6a708f;--green:#00e676;--red:#ff3d57;--blue:#2979ff;--yellow:#ffd740;--font:'Segoe UI',system-ui,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
+.page{min-height:100vh;display:grid;grid-template-rows:56px 1fr}
+.header{display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.brand{font-size:15px;font-weight:900;letter-spacing:.02em;white-space:nowrap}.brand span{color:var(--blue)}
+.spacer{flex:1}
+.status-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.04em;color:var(--muted)}
+.pill.mode{background:#2979ff18;border-color:#2979ff44;color:var(--blue)}
+.link-btn,.ghost-btn,.solid-btn,.danger-btn{border-radius:4px;border:1px solid var(--line);padding:6px 10px;font-size:11px;font-weight:800;letter-spacing:.02em;text-decoration:none;cursor:pointer;white-space:nowrap}
+.link-btn{background:#2979ff18;color:var(--blue);border-color:#2979ff40}.ghost-btn{background:#25284080;color:var(--text)}.solid-btn{background:#00e676;color:#06120a;border-color:#00e676}.danger-btn{background:#ff3d57;color:#fff;border-color:#ff3d57}
+button:disabled{opacity:.35;cursor:not-allowed}
+.main{padding:12px;max-width:1120px;width:100%;margin:0 auto}
+.stack{display:flex;flex-direction:column;gap:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.panel-title{font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.panel-body{padding:12px}
+.muted{color:var(--muted)}.pos{color:var(--green)}.neg{color:var(--red)}.warn{color:var(--yellow)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid1{display:grid;grid-template-columns:1fr;gap:8px}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}.label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:.04em;text-transform:uppercase}
+.inp{width:100%;background:#0d101a;border:1px solid var(--line);border-radius:4px;color:var(--text);font:inherit;padding:8px;outline:none}.inp:focus{border-color:var(--blue)}
+.check-row{display:flex;align-items:center;gap:8px;background:#0d101a;border:1px solid var(--line);border-radius:4px;padding:8px;color:var(--text);font-weight:800}.check-row input{width:16px;height:16px;accent-color:var(--green)}
+.status-card,.metric{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:10px}
+.metric-label{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em}.metric-value{font-size:16px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.log{height:220px;overflow:auto;background:#0d101a;border:1px solid var(--line);border-radius:4px}
+.log-line{display:grid;grid-template-columns:72px 1fr;gap:8px;padding:6px 8px;border-bottom:1px solid #1d2032;font-size:11px}.log-time{color:var(--muted)}
+@media (max-width:720px){.header{position:static;align-items:flex-start;padding:12px;flex-wrap:wrap}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="header">
+    <div class="brand"><span>MT5</span> Connection</div>
+    <div class="spacer"></div>
+    <div class="status-strip">
+      <span class="pill mode">EXNESS DEMO</span>
+      <a class="link-btn" href="/pine.html">Pine Upload</a>
+      <a class="link-btn" href="/allinone.html">All-in-One</a>
+      <a class="link-btn" href="/utbot.html">UT Bot</a>
+      <form method="POST" action="/logout" style="margin:0"><button class="ghost-btn" type="submit">Logout</button></form>
+    </div>
+  </header>
+  <main class="main">
+    <div class="stack">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Exness MT5 Demo Credentials</div>
+          <div class="muted" id="status-line">Loading...</div>
+        </div>
+        <div class="panel-body">
+          <div id="summary" class="status-card muted">MetaTrader 5.app will be launched with a generated MT5 config using your Exness demo server, account number, and password.</div>
+          <div class="grid1" style="margin-top:10px">
+            <label class="check-row"><input id="enabled" type="checkbox"> Enable live MT5 order routing from running bots</label>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div class="field"><label class="label" for="server">Server Name</label><input class="inp" id="server" type="text" placeholder="Exness-MT5Trial6"></div>
+            <div class="field"><label class="label" for="account-login">Account Number</label><input class="inp" id="account-login" type="text" inputmode="numeric" placeholder="12345678"></div>
+          </div>
+          <div class="grid1" style="margin-top:8px">
+            <div class="field"><label class="label" for="password">Password</label><input class="inp" id="password" type="password" placeholder="Trading account password"></div>
+          </div>
+          <div class="grid2" style="margin-top:8px">
+            <div class="field"><label class="label" for="symbol">MT5 Symbol</label><input class="inp" id="symbol" type="text" placeholder="BTCUSDm"></div>
+            <div class="field"><label class="label" for="fixed-volume">Fixed Order Volume</label><input class="inp" id="fixed-volume" type="number" min="0.01" step="0.01" value="0.01"></div>
+          </div>
+          <div class="grid2" style="margin-top:8px">
+            <div class="field"><label class="label" for="deviation-points">Deviation Points</label><input class="inp" id="deviation-points" type="number" min="0" step="1" value="200"></div>
+            <div class="field"><label class="label">Execution Model</label><div class="status-card muted">All bot opens/closes route to one MT5 symbol. On netting accounts, multiple strategies on the same symbol can merge.</div></div>
+          </div>
+          <div class="grid2" style="margin-top:8px">
+            <div class="field"><label class="label" for="app-path">MT5 App Path</label><input class="inp" id="app-path" type="text"></div>
+            <div class="field"><label class="label" for="bottle-path">Bottle Path</label><input class="inp" id="bottle-path" type="text"></div>
+          </div>
+          <div class="btn-row">
+            <button class="ghost-btn" type="button" onclick="loadConfig()">Refresh</button>
+            <button class="solid-btn" type="button" onclick="saveConfig()">Save Credentials</button>
+            <button class="link-btn" type="button" onclick="connectMT5()">Save & Connect</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Terminal Status</div><div class="muted" id="last-launch">--</div></div>
+        <div class="panel-body">
+          <div class="grid2">
+            <div class="metric"><div class="metric-label">Routing</div><div class="metric-value" id="enabled-state">--</div></div>
+            <div class="metric"><div class="metric-label">Configured</div><div class="metric-value" id="configured">--</div></div>
+            <div class="metric"><div class="metric-label">Running</div><div class="metric-value" id="running">--</div></div>
+            <div class="metric"><div class="metric-label">Masked Login</div><div class="metric-value" id="masked-login">--</div></div>
+            <div class="metric"><div class="metric-label">MT5 Symbol</div><div class="metric-value" id="symbol-state">--</div></div>
+            <div class="metric"><div class="metric-label">Bridge EA</div><div class="metric-value" id="bridge-compiled">--</div></div>
+            <div class="metric"><div class="metric-label">Terminal Heartbeat</div><div class="metric-value" id="bridge-heartbeat">--</div></div>
+            <div class="metric"><div class="metric-label">Config File</div><div class="metric-value" id="config-path">--</div></div>
+          </div>
+          <div class="status-card" id="bridge-note" style="margin-top:10px">Attach <b>ScpBotBridgeEA</b> to one MT5 chart and enable Algo Trading so the terminal can process bot command files.</div>
+          <div class="status-card" id="last-error" style="margin-top:10px">No recent MT5 errors.</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Activity</div><button class="ghost-btn" type="button" onclick="clearLog()">Clear</button></div>
+        <div class="panel-body"><div id="log" class="log"></div></div>
+      </section>
+    </div>
+  </main>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+async function api (path, opts = {}) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function fmtTime (value) {
+  return value ? new Date(value).toLocaleString([], { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' }) : '--';
+}
+function esc (value) {
+  return String(value ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m]));
+}
+function addLog (level, msg) {
+  const row = document.createElement('div');
+  row.className = 'log-line';
+  const cls = level === 'error' ? 'neg' : level === 'success' ? 'pos' : level === 'warn' ? 'warn' : '';
+  row.innerHTML = `<div class="log-time">${fmtTime(Date.now())}</div><div class="${cls}">${esc(msg)}</div>`;
+  $('log').prepend(row);
+  while ($('log').children.length > 120) $('log').lastChild.remove();
+}
+function clearLog () { $('log').innerHTML = ''; }
+function setConfigView (cfg = {}) {
+  $('enabled').checked = Boolean(cfg.enabled);
+  $('server').value = cfg.server || '';
+  $('account-login').value = cfg.accountLogin || '';
+  $('password').value = '';
+  $('symbol').value = cfg.symbol || 'BTCUSDm';
+  $('fixed-volume').value = cfg.fixedVolume || 0.01;
+  $('deviation-points').value = cfg.deviationPoints || 200;
+  $('app-path').value = cfg.appPath || '/Applications/MetaTrader 5.app';
+  $('bottle-path').value = cfg.bottlePath || '';
+  $('status-line').textContent = cfg.running ? 'Terminal running' : (cfg.configured ? 'Ready to connect' : 'Credentials not saved');
+  $('summary').innerHTML = cfg.server
+    ? `<b>${esc(cfg.server)}</b><br><span class="muted">Account ${esc(cfg.maskedAccountLogin || '--')} / Symbol ${esc(cfg.symbol || '--')} / Fixed volume ${esc(cfg.fixedVolume || '--')} / MT5 config ${esc(cfg.configPathWin || '--')}</span>`
+    : 'MetaTrader 5.app will be launched with a generated MT5 config using your Exness demo server, account number, and password.';
+  $('enabled-state').textContent = cfg.enabled ? 'ON' : 'OFF';
+  $('enabled-state').className = `metric-value ${cfg.enabled ? 'pos' : 'warn'}`;
+  $('configured').textContent = cfg.configured ? 'YES' : 'NO';
+  $('configured').className = `metric-value ${cfg.configured ? 'pos' : 'warn'}`;
+  $('running').textContent = cfg.running ? 'LIVE' : 'OFF';
+  $('running').className = `metric-value ${cfg.running ? 'pos' : 'warn'}`;
+  $('masked-login').textContent = cfg.maskedAccountLogin || '--';
+  $('symbol-state').textContent = cfg.symbol || '--';
+  $('bridge-compiled').textContent = cfg.bridgeCompiled ? 'READY' : 'SOURCE ONLY';
+  $('bridge-compiled').className = `metric-value ${cfg.bridgeCompiled ? 'pos' : 'warn'}`;
+  $('bridge-heartbeat').textContent = cfg.bridgeStatus?.time || '--';
+  $('bridge-heartbeat').className = `metric-value ${cfg.bridgeStatus?.exists ? 'pos' : 'warn'}`;
+  $('config-path').textContent = cfg.configPathMac || '--';
+  $('last-launch').textContent = cfg.lastLaunchAt ? `Last launch ${fmtTime(cfg.lastLaunchAt)}` : 'Not launched yet';
+  $('bridge-note').innerHTML = cfg.bridgeStatus?.exists
+    ? `<b>EA heartbeat received</b><br><span class="muted">Attach it to any MT5 chart once. Current login ${esc(cfg.bridgeStatus.login || '--')} / server ${esc(cfg.bridgeStatus.server || '--')} / positions ${esc(cfg.bridgeStatus.positions || '--')}.</span>`
+    : (cfg.bridgeCompiled
+      ? 'Attach <b>ScpBotBridgeEA</b> to one MT5 chart and enable Algo Trading so the terminal can process bot command files.'
+      : 'The bridge source is installed, but the EA is not compiled yet. Open <b>ScpBotBridgeEA.mq5</b> in MetaEditor, compile it, then attach it to one MT5 chart and enable Algo Trading.');
+  $('last-error').innerHTML = cfg.lastError ? `<span class="neg">${esc(cfg.lastError)}</span>` : 'No recent MT5 errors.';
+}
+function payload () {
+  return {
+    enabled: $('enabled').checked,
+    server: $('server').value.trim(),
+    accountLogin: $('account-login').value.trim(),
+    password: $('password').value,
+    symbol: $('symbol').value.trim(),
+    fixedVolume: Number($('fixed-volume').value) || 0.01,
+    deviationPoints: Number($('deviation-points').value) || 0,
+    appPath: $('app-path').value.trim(),
+    bottlePath: $('bottle-path').value.trim(),
+  };
+}
+async function loadConfig () {
+  const cfg = await api('/api/mt5/config');
+  setConfigView(cfg);
+  addLog('info', 'MT5 config loaded.');
+}
+async function saveConfig () {
+  const data = await api('/api/mt5/config', {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json' },
+    body:JSON.stringify(payload()),
+  });
+  setConfigView(data.config || {});
+  $('password').value = '';
+  addLog('success', 'MT5 credentials saved.');
+}
+async function connectMT5 () {
+  try {
+    await saveConfig();
+    const data = await api('/api/mt5/connect', { method:'POST' });
+    setConfigView(data.config || {});
+    addLog('success', 'MT5 launch requested. Open MetaTrader 5, attach ScpBotBridgeEA to a chart once, and enable Algo Trading.');
+  } catch (err) {
+    addLog('error', `Connect failed: ${err.message}`);
+  }
+}
+window.addEventListener('load', () => {
+  loadConfig().catch(err => addLog('error', `MT5 config load failed: ${err.message}`));
+});
+</script>
+</body>
+</html>

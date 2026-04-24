@@ -5,11 +5,14 @@ const express    = require('express');
 const http       = require('http');
 const https      = require('https');
 const crypto     = require('crypto');
+const fs         = require('fs');
+const os         = require('os');
 const { Server } = require('socket.io');
 const path       = require('path');
+const { execFile, spawn } = require('child_process');
 
 const db                                      = require('./db');
-const { Session, PineScriptConfig, AllInOneStrategyConfig, UTBotConfig, Trade, Position, DailyPnl, Equity } = db;
+const { Session, PineScriptConfig, AllInOneStrategyConfig, UTBotConfig, MT5ConnectionConfig, Trade, Position, DailyPnl, Equity } = db;
 const { BotManager, StrategyRunner }         = require('./bot-manager');
 const { ScalpingStrategy }                   = require('./strategies/scalping');
 const { RangeBreakoutStrategy }              = require('./strategies/breakout');
@@ -72,6 +75,322 @@ function parseCookies (header = '') {
 function sessionCookie (token, clear = false) {
   if (clear) return 'btcbot_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Strict';
   return `btcbot_session=${token}; Path=/; Max-Age=${SESSION_TTL_MS / 1000}; HttpOnly; SameSite=Strict`;
+}
+
+const MT5_DEFAULT_APP_PATH = '/Applications/MetaTrader 5.app';
+const MT5_DEFAULT_BOTTLE_PATH = path.join(os.homedir(), 'Library', 'Application Support', 'MetaTrader 5', 'Bottles', 'metatrader5');
+const MT5_DEFAULT_PROGRAM_DIR = path.join(MT5_DEFAULT_BOTTLE_PATH, 'drive_c', 'Program Files', 'MetaTrader 5');
+const MT5_DEFAULT_CONFIG_PATH_MAC = path.join(MT5_DEFAULT_PROGRAM_DIR, 'Config', 'exness-bridge.ini');
+const MT5_DEFAULT_CONFIG_PATH_WIN = 'c:\\Program Files\\MetaTrader 5\\Config\\exness-bridge.ini';
+const MT5_BRIDGE_FOLDER = 'ScpBotBridge';
+const MT5_BRIDGE_SOURCE_NAME = 'ScpBotBridgeEA.mq5';
+const MT5_BRIDGE_COMPILED_NAME = 'ScpBotBridgeEA.ex5';
+const MT5_BRIDGE_REPO_SOURCE = path.join(__dirname, 'mt5', MT5_BRIDGE_SOURCE_NAME);
+
+function mt5CipherKey () {
+  return crypto
+    .createHash('sha256')
+    .update(String(process.env.MT5_CONFIG_SECRET || DASHBOARD_PWD || 'mt5-local-secret'))
+    .digest();
+}
+
+function encryptMt5Password (plain = '') {
+  const value = String(plain || '');
+  if (!value) return '';
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', mt5CipherKey(), iv);
+  const enc = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return `${iv.toString('hex')}:${enc.toString('hex')}`;
+}
+
+function decryptMt5Password (packed = '') {
+  const value = String(packed || '');
+  if (!value || !value.includes(':')) return '';
+  const [ivHex, encHex] = value.split(':');
+  const iv = Buffer.from(ivHex, 'hex');
+  const enc = Buffer.from(encHex, 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', mt5CipherKey(), iv);
+  return Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
+}
+
+function maskAccountLogin (value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.length <= 4) return raw;
+  return `${raw.slice(0, 2)}${'*'.repeat(Math.max(0, raw.length - 4))}${raw.slice(-2)}`;
+}
+
+function execFileAsync (file, args = [], opts = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, opts, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function mt5Paths (doc = {}) {
+  const bottlePath = doc.bottlePath || MT5_DEFAULT_BOTTLE_PATH;
+  const programDir = path.join(bottlePath, 'drive_c', 'Program Files', 'MetaTrader 5');
+  const expertsDir = path.join(programDir, 'MQL5', 'Experts');
+  const filesDir = path.join(programDir, 'MQL5', 'Files', MT5_BRIDGE_FOLDER);
+  return {
+    appPath: doc.appPath || MT5_DEFAULT_APP_PATH,
+    bottlePath,
+    programDir,
+    expertsDir,
+    filesDir,
+    inboxDir: path.join(filesDir, 'inbox'),
+    ackDir: path.join(filesDir, 'ack'),
+    statusDir: path.join(filesDir, 'status'),
+    configPathMac: path.join(programDir, 'Config', 'exness-bridge.ini'),
+    configPathWin: MT5_DEFAULT_CONFIG_PATH_WIN,
+    bridgeSourcePathMac: path.join(expertsDir, MT5_BRIDGE_SOURCE_NAME),
+    bridgeCompiledPathMac: path.join(expertsDir, MT5_BRIDGE_COMPILED_NAME),
+    bridgeSourcePathWin: `c:\\Program Files\\MetaTrader 5\\MQL5\\Experts\\${MT5_BRIDGE_SOURCE_NAME}`,
+  };
+}
+
+async function ensureMt5ConfigDoc () {
+  await MT5ConnectionConfig.updateOne(
+    { key: 'exness-mt5' },
+    {
+      $setOnInsert: {
+        name: 'Exness MT5 Demo',
+        provider: 'exness-mt5',
+        appPath: MT5_DEFAULT_APP_PATH,
+        bottlePath: MT5_DEFAULT_BOTTLE_PATH,
+        configPathMac: MT5_DEFAULT_CONFIG_PATH_MAC,
+        configPathWin: MT5_DEFAULT_CONFIG_PATH_WIN,
+        symbol: 'BTCUSDm',
+        fixedVolume: 0.01,
+        deviationPoints: 200,
+      },
+    },
+    { upsert: true }
+  );
+  return MT5ConnectionConfig.findOne({ key: 'exness-mt5' });
+}
+
+function mt5ConfigText (doc, password) {
+  return [
+    '[Common]',
+    `Login=${String(doc.accountLogin || '').trim()}`,
+    `Password=${String(password || '').trim()}`,
+    `Server=${String(doc.server || '').trim()}`,
+    'KeepPrivate=1',
+    'NewsEnable=0',
+    '',
+  ].join('\n');
+}
+
+async function writeMt5ConfigFile (doc) {
+  const secret = decryptMt5Password(doc.passwordEnc);
+  if (!secret) throw new Error('MT5 password is not configured');
+  const paths = mt5Paths(doc);
+  await fs.promises.mkdir(path.dirname(paths.configPathMac), { recursive: true });
+  await fs.promises.writeFile(paths.configPathMac, mt5ConfigText(doc, secret), 'utf8');
+  return paths;
+}
+
+async function detectMt5Running () {
+  try {
+    const { stdout } = await execFileAsync('/usr/bin/pgrep', ['-fal', 'MetaTrader 5']);
+    const lines = String(stdout || '').trim().split('\n').map(s => s.trim()).filter(Boolean);
+    return { running: lines.length > 0, processes: lines };
+  } catch (error) {
+    return { running: false, processes: [] };
+  }
+}
+
+function mt5CommandText (payload = {}) {
+  return Object.entries(payload)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join('\n') + '\n';
+}
+
+function parseMt5KvText (text = '') {
+  const out = {};
+  for (const rawLine of String(text || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || !line.includes('=')) continue;
+    const idx = line.indexOf('=');
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    if (key) out[key] = value;
+  }
+  return out;
+}
+
+function mt5MagicForRunner (runnerId = '') {
+  const hash = crypto.createHash('md5').update(String(runnerId || '')).digest('hex').slice(0, 7);
+  return 1000000 + parseInt(hash, 16);
+}
+
+async function ensureMt5BridgeFiles (doc) {
+  const paths = mt5Paths(doc);
+  await Promise.all([
+    fs.promises.mkdir(paths.expertsDir, { recursive: true }),
+    fs.promises.mkdir(paths.inboxDir, { recursive: true }),
+    fs.promises.mkdir(paths.ackDir, { recursive: true }),
+    fs.promises.mkdir(paths.statusDir, { recursive: true }),
+  ]);
+  await fs.promises.copyFile(MT5_BRIDGE_REPO_SOURCE, paths.bridgeSourcePathMac);
+  doc.bridgeSourcePath = paths.bridgeSourcePathMac;
+  doc.bridgeCompiledPath = paths.bridgeCompiledPathMac;
+  return paths;
+}
+
+async function compileMt5Bridge (doc) {
+  const paths = await ensureMt5BridgeFiles(doc);
+  const wineScript = path.join(paths.appPath, 'Contents', 'SharedSupport', 'metatrader5', 'MetaTrader 5', 'wine');
+  if (!fs.existsSync(wineScript)) {
+    return { ok: false, error: `Wine launcher not found at ${wineScript}` };
+  }
+  try {
+    const { stdout, stderr } = await execFileAsync(wineScript, [
+      '--enable-alt-loader', 'macdrv',
+      '--bottle', 'default',
+      '--wait-children',
+      '--workdir', 'c:/Program Files/MetaTrader 5',
+      'metaeditor64.exe',
+      `/compile:${paths.bridgeSourcePathWin}`,
+    ], { timeout: 120000 });
+    const compiled = fs.existsSync(paths.bridgeCompiledPathMac);
+    return { ok: compiled, stdout, stderr, error: compiled ? '' : 'MetaEditor compile did not produce EX5 output' };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: error.stdout || '',
+      stderr: error.stderr || '',
+      error: error.message,
+    };
+  }
+}
+
+async function readMt5BridgeStatus (doc) {
+  const paths = mt5Paths(doc);
+  const statusPath = path.join(paths.statusDir, 'terminal.status');
+  const status = { exists: false };
+  try {
+    const raw = await fs.promises.readFile(statusPath, 'utf8');
+    const parsed = parseMt5KvText(raw);
+    return { exists: true, path: statusPath, ...parsed };
+  } catch (_err) {
+    return { ...status, path: statusPath };
+  }
+}
+
+async function enqueueMt5Command (doc, command) {
+  if (!doc.enabled) return { queued: false, skipped: 'MT5 live execution is disabled' };
+  if (!doc.configured || !doc.server || !doc.accountLogin || !doc.passwordEnc) {
+    return { queued: false, skipped: 'MT5 credentials are incomplete' };
+  }
+  const paths = await ensureMt5BridgeFiles(doc);
+  const id = command.id || `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const fileName = `${id}.cmd`;
+  const filePath = path.join(paths.inboxDir, fileName);
+  await fs.promises.writeFile(filePath, mt5CommandText({ ...command, id }), 'utf8');
+  return { queued: true, id, fileName, filePath };
+}
+
+async function launchMt5 (doc) {
+  const paths = await writeMt5ConfigFile(doc);
+  await ensureMt5BridgeFiles(doc);
+  const compile = await compileMt5Bridge(doc);
+  const appPath = paths.appPath;
+  if (!fs.existsSync(appPath)) throw new Error(`MetaTrader 5 app not found at ${appPath}`);
+  const child = spawn('/usr/bin/open', ['-a', appPath, '--args', `/config:${paths.configPathWin}`], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+  doc.appPath = appPath;
+  doc.bottlePath = paths.bottlePath;
+  doc.configPathMac = paths.configPathMac;
+  doc.configPathWin = paths.configPathWin;
+  doc.bridgeSourcePath = paths.bridgeSourcePathMac;
+  doc.bridgeCompiledPath = paths.bridgeCompiledPathMac;
+  doc.lastLaunchAt = new Date();
+  doc.lastError = compile.ok ? '' : (compile.error || compile.stderr || compile.stdout || '');
+  await doc.save();
+  return { paths, compile };
+}
+
+async function queueMt5PositionOpen (position, runner) {
+  const doc = await ensureMt5ConfigDoc();
+  if (!doc.enabled) return;
+  const volume = Math.max(0.01, Number(doc.fixedVolume) || 0.01);
+  const side = String(position?.type || '').toLowerCase() === 'short' ? 'SELL' : 'BUY';
+  const sl = Number(position?.sl);
+  const tp = Number(position?.tp);
+  const response = await enqueueMt5Command(doc, {
+    action: 'OPEN',
+    runnerId: runner.id,
+    strategy: runner.displayName || runner.id,
+    symbol: doc.symbol || 'BTCUSDm',
+    side,
+    volume: volume.toFixed(2),
+    deviation: Math.max(0, Math.round(Number(doc.deviationPoints) || 0)),
+    magic: mt5MagicForRunner(runner.id),
+    comment: `${runner.id}`.slice(0, 24),
+    sl: Number.isFinite(sl) ? sl : '',
+    tp: Number.isFinite(tp) ? tp : '',
+  });
+  if (!response.queued && response.skipped) return;
+}
+
+async function queueMt5TradeClose (_trade, runner) {
+  const doc = await ensureMt5ConfigDoc();
+  if (!doc.enabled) return;
+  const response = await enqueueMt5Command(doc, {
+    action: 'CLOSE',
+    runnerId: runner.id,
+    strategy: runner.displayName || runner.id,
+    symbol: doc.symbol || 'BTCUSDm',
+    deviation: Math.max(0, Math.round(Number(doc.deviationPoints) || 0)),
+    magic: mt5MagicForRunner(runner.id),
+    comment: `${runner.id}`.slice(0, 24),
+  });
+  if (!response.queued && response.skipped) return;
+}
+
+async function mt5ConfigView () {
+  const doc = await ensureMt5ConfigDoc();
+  const paths = mt5Paths(doc);
+  const proc = await detectMt5Running();
+  const bridgeStatus = await readMt5BridgeStatus(doc);
+  return {
+    key: doc.key,
+    name: doc.name || 'Exness MT5 Demo',
+    provider: doc.provider || 'exness-mt5',
+    enabled: Boolean(doc.enabled),
+    server: doc.server || '',
+    accountLogin: doc.accountLogin || '',
+    maskedAccountLogin: maskAccountLogin(doc.accountLogin || ''),
+    symbol: doc.symbol || 'BTCUSDm',
+    fixedVolume: Number(doc.fixedVolume || 0.01),
+    deviationPoints: Number(doc.deviationPoints || 200),
+    configured: Boolean(doc.configured && doc.server && doc.accountLogin && doc.passwordEnc),
+    running: proc.running,
+    processes: proc.processes,
+    appPath: paths.appPath,
+    bottlePath: paths.bottlePath,
+    configPathMac: paths.configPathMac,
+    configPathWin: paths.configPathWin,
+    bridgeSourcePath: paths.bridgeSourcePathMac,
+    bridgeCompiledPath: paths.bridgeCompiledPathMac,
+    bridgeCompiled: fs.existsSync(paths.bridgeCompiledPathMac),
+    bridgeStatus,
+    lastLaunchAt: doc.lastLaunchAt,
+    lastError: doc.lastError || '',
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,9 +507,9 @@ io.use((socket, next) => {
 //  BotManager + runners
 // ─────────────────────────────────────────────────────────────────────────────
 const manager = new BotManager(io);
-const scalpRunner    = new StrategyRunner('scalping',    new ScalpingStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { displayName: 'EMA Scalping' });
-const breakoutRunner = new StrategyRunner('breakout',    new RangeBreakoutStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { displayName: 'Range Breakout' });
-const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertrendStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { displayName: 'Heikin-Ashi SuperTrend' });
+const scalpRunner    = new StrategyRunner('scalping',    new ScalpingStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { displayName: 'EMA Scalping', onPositionOpened: queueMt5PositionOpen, onTradeClosed: queueMt5TradeClose });
+const breakoutRunner = new StrategyRunner('breakout',    new RangeBreakoutStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { displayName: 'Range Breakout', onPositionOpened: queueMt5PositionOpen, onTradeClosed: queueMt5TradeClose });
+const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertrendStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { displayName: 'Heikin-Ashi SuperTrend', onPositionOpened: queueMt5PositionOpen, onTradeClosed: queueMt5TradeClose });
 const pineRunners    = new Map(); // scriptId -> StrategyRunner
 const allInOneRunners = new Map(); // strategyKey -> StrategyRunner
 let utBotRunner = null;
@@ -398,7 +717,7 @@ function ensurePineRunner (doc) {
         profitRatioBooking: doc.profitRatioBooking ?? 1.67,
       }),
       io,
-      { sessionStrategyType: 'pine', pineScriptId: scriptId, displayName: doc.name, lotSize: doc.lotSize || 1 }
+      { sessionStrategyType: 'pine', pineScriptId: scriptId, displayName: doc.name, lotSize: doc.lotSize || 1, onPositionOpened: queueMt5PositionOpen, onTradeClosed: queueMt5TradeClose }
     );
     pineRunners.set(scriptId, runner);
     manager.addRunner(runner);
@@ -761,6 +1080,8 @@ function ensureUTBotRunner (doc) {
       {
         sessionStrategyType: 'utbot',
         displayName: 'UT Bot Alerts',
+        onPositionOpened: queueMt5PositionOpen,
+        onTradeClosed: queueMt5TradeClose,
       }
     );
     manager.addRunner(utBotRunner);
@@ -805,6 +1126,8 @@ function ensureAllInOneRunner (doc) {
       {
         sessionStrategyType: allInOneRunnerId(key),
         displayName: doc.name,
+        onPositionOpened: queueMt5PositionOpen,
+        onTradeClosed: queueMt5TradeClose,
       }
     );
     allInOneRunners.set(key, runner);
@@ -862,6 +1185,21 @@ function calcUnrealizedPnl (position, markPrice) {
   };
 }
 
+function normalizedLots (row) {
+  const explicit = Number(row?.lotSize);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const qty = Number(row?.qty);
+  return Number.isFinite(qty) && qty > 0 ? qty : null;
+}
+
+function normalizedMarginUsed (row) {
+  const explicit = Number(row?.marginUsed);
+  if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+  const entry = Number(row?.entry);
+  const qty = Number(row?.qty);
+  return Number.isFinite(entry) && Number.isFinite(qty) ? Math.abs(entry * qty) : null;
+}
+
 function startStrategyWatchdog () {
   if (strategyWatchdogTimer) return;
   strategyWatchdogTimer = setInterval(() => {
@@ -875,6 +1213,57 @@ function startStrategyWatchdog () {
 // ─────────────────────────────────────────────────────────────────────────────
 //  REST API
 // ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/mt5/config', async (_req, res) => {
+  try {
+    res.json(await mt5ConfigView());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/mt5/config', async (req, res) => {
+  try {
+    const doc = await ensureMt5ConfigDoc();
+    const body = req.body || {};
+    if (body.enabled !== undefined) doc.enabled = Boolean(body.enabled);
+    if (body.server !== undefined) doc.server = String(body.server || '').trim();
+    if (body.accountLogin !== undefined) doc.accountLogin = String(body.accountLogin || '').trim();
+    if (body.password !== undefined && String(body.password || '').trim()) {
+      doc.passwordEnc = encryptMt5Password(String(body.password || '').trim());
+    }
+    if (body.symbol !== undefined) doc.symbol = String(body.symbol || '').trim() || 'BTCUSDm';
+    if (body.fixedVolume !== undefined) doc.fixedVolume = Math.max(0.01, Number(body.fixedVolume) || 0.01);
+    if (body.deviationPoints !== undefined) doc.deviationPoints = Math.max(0, Math.round(Number(body.deviationPoints) || 0));
+    if (body.appPath !== undefined && String(body.appPath || '').trim()) doc.appPath = String(body.appPath || '').trim();
+    if (body.bottlePath !== undefined && String(body.bottlePath || '').trim()) doc.bottlePath = String(body.bottlePath || '').trim();
+    const paths = mt5Paths(doc);
+    doc.configPathMac = paths.configPathMac;
+    doc.configPathWin = paths.configPathWin;
+    doc.bridgeSourcePath = paths.bridgeSourcePathMac;
+    doc.bridgeCompiledPath = paths.bridgeCompiledPathMac;
+    doc.configured = Boolean(doc.server && doc.accountLogin && doc.passwordEnc);
+    doc.lastError = '';
+    await doc.save();
+    res.json({ ok: true, config: await mt5ConfigView() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/mt5/connect', async (_req, res) => {
+  try {
+    const doc = await ensureMt5ConfigDoc();
+    if (!doc.configured || !doc.server || !doc.accountLogin || !doc.passwordEnc) {
+      return res.status(400).json({ error: 'MT5 server, account number, and password are required' });
+    }
+    await launchMt5(doc);
+    res.json({ ok: true, config: await mt5ConfigView() });
+  } catch (e) {
+    const doc = await ensureMt5ConfigDoc().catch(() => null);
+    if (doc) {
+      doc.lastError = e.message;
+      await doc.save().catch(() => {});
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/strategy/:id/status', async (req, res) => {
   const runner = manager.getRunner(req.params.id);
   if (!runner) return res.status(404).json({ error: 'Unknown strategy' });
@@ -1011,6 +1400,8 @@ app.get('/api/positions', async (req, res) => {
         entry: p.entry,
         markPrice,
         qty: p.qty,
+        lots: normalizedLots(p),
+        marginUsed: normalizedMarginUsed(p),
         sl: p.sl,
         tp: p.tp,
         trailSl: p.trailSl,
@@ -1037,6 +1428,8 @@ app.get('/api/positions', async (req, res) => {
         entry: t.entry,
         exit: t.exit,
         qty: t.qty,
+        lots: normalizedLots(t),
+        marginUsed: normalizedMarginUsed(t),
         sl: t.sl,
         tp: t.tp,
         pnl: t.pnl,

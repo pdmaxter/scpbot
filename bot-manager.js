@@ -29,6 +29,19 @@ const qtyLabel = value => {
   const n = Number(value);
   return Number.isFinite(n) ? n.toFixed(6) : '0.000000';
 };
+const lotSizeValue = payload => {
+  const explicit = Number(payload?.lotSize);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const qty = Number(payload?.qty);
+  return Number.isFinite(qty) && qty > 0 ? qty : null;
+};
+const marginUsedValue = payload => {
+  const explicit = Number(payload?.marginUsed);
+  if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+  const entry = Number(payload?.entry);
+  const qty = Number(payload?.qty);
+  return Number.isFinite(entry) && Number.isFinite(qty) ? Math.abs(entry * qty) : null;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  StrategyRunner — wraps one strategy instance with independent lifecycle
@@ -42,6 +55,8 @@ class StrategyRunner {
     this.pineScriptId        = opts.pineScriptId || null;
     this.displayName         = opts.displayName || id;
     this.lotSize             = opts.lotSize || null;
+    this.onPositionOpened    = typeof opts.onPositionOpened === 'function' ? opts.onPositionOpened : null;
+    this.onTradeClosed       = typeof opts.onTradeClosed === 'function' ? opts.onTradeClosed : null;
     this.sessionId        = null;
     this.running          = false;
     this.paused           = false;
@@ -72,9 +87,17 @@ class StrategyRunner {
       if (this.sessionId) {
         await Position.findOneAndUpdate(
           { sessionId: this.sessionId },
-          { ...pos, sessionId: this.sessionId },
+          {
+            ...pos,
+            lotSize: lotSizeValue(pos),
+            marginUsed: marginUsedValue(pos),
+            sessionId: this.sessionId,
+          },
           { upsert: true, new: true }
         ).catch(() => {});
+      }
+      if (this.onPositionOpened) {
+        await this.onPositionOpened(pos, this).catch(e => console.error(`[${id}] External open handler failed:`, e.message));
       }
       this.emit('position_opened', pos);
     });
@@ -90,7 +113,8 @@ class StrategyRunner {
       await Trade.create({
         sessionId: this.sessionId,
         tradeNum: trade.id, type: trade.type, entry: trade.entry,
-        exit: trade.exit, qty: trade.qty, pnl: trade.pnl, pnlPct: trade.pnlPct,
+        exit: trade.exit, qty: trade.qty, lotSize: lotSizeValue(trade), marginUsed: marginUsedValue(trade),
+        pnl: trade.pnl, pnlPct: trade.pnlPct,
         entryTime: trade.entryTime, exitTime: trade.exitTime,
         reason: trade.reason, sl: trade.sl, tp: trade.tp,
       }).catch(e => console.error(`[${id}] Trade save failed:`, e.message));
@@ -109,6 +133,9 @@ class StrategyRunner {
       }).catch(e => console.error(`[${id}] Session update failed:`, e.message));
 
       await Position.deleteOne({ sessionId: this.sessionId }).catch(() => {});
+      if (this.onTradeClosed) {
+        await this.onTradeClosed(trade, this).catch(e => console.error(`[${id}] External close handler failed:`, e.message));
+      }
 
       const sessInfo = await this.buildSessionInfo().catch(() => null);
       if (sessInfo) this.emit('session_info', sessInfo);

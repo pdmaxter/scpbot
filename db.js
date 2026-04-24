@@ -41,6 +41,8 @@ const tradeSchema = new mongoose.Schema({
   entry:      Number,
   exit:       Number,
   qty:        Number,
+  lotSize:    Number,
+  marginUsed: Number,
   pnl:        Number,
   pnlPct:     Number,
   entryTime:  Number,   // Unix ms
@@ -88,6 +90,8 @@ const positionSchema = new mongoose.Schema({
   tp:         Number,
   trailSl:    Number,
   qty:        Number,
+  lotSize:    Number,
+  marginUsed: Number,
   entryTime:  Number,
 }, { timestamps: true });
 
@@ -142,6 +146,31 @@ const utBotConfigSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: false, index: true },
 }, { timestamps: true });
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  MT5ConnectionConfig — persisted MetaTrader 5 / Exness connection settings
+// ─────────────────────────────────────────────────────────────────────────────
+const mt5ConnectionConfigSchema = new mongoose.Schema({
+  key:             { type: String, default: 'exness-mt5', unique: true, index: true },
+  name:            { type: String, default: 'Exness MT5 Demo' },
+  provider:        { type: String, default: 'exness-mt5', index: true },
+  enabled:         { type: Boolean, default: false },
+  server:          { type: String, default: '' },
+  accountLogin:    { type: String, default: '' },
+  passwordEnc:     { type: String, default: '' },
+  symbol:          { type: String, default: 'BTCUSDm' },
+  fixedVolume:     { type: Number, default: 0.01 },
+  deviationPoints: { type: Number, default: 200 },
+  appPath:         { type: String, default: '/Applications/MetaTrader 5.app' },
+  bottlePath:      { type: String, default: '' },
+  configPathMac:   { type: String, default: '' },
+  configPathWin:   { type: String, default: '' },
+  bridgeSourcePath:{ type: String, default: '' },
+  bridgeCompiledPath:{ type: String, default: '' },
+  configured:      { type: Boolean, default: false },
+  lastLaunchAt:    { type: Date, default: null },
+  lastError:       { type: String, default: '' },
+}, { timestamps: true });
+
 module.exports = {
   connect,
   Session:   mongoose.model('BotSession',   sessionSchema),
@@ -152,4 +181,5 @@ module.exports = {
   PineScriptConfig: mongoose.model('PineScriptConfig', pineScriptSchema),
   AllInOneStrategyConfig: mongoose.model('AllInOneStrategyConfig', allInOneStrategySchema),
   UTBotConfig: mongoose.model('UTBotConfig', utBotConfigSchema),
+  MT5ConnectionConfig: mongoose.model('MT5ConnectionConfig', mt5ConnectionConfigSchema),
 };
