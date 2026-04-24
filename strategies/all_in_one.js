@@ -312,18 +312,19 @@ class AllInOneStrategy extends EventEmitter {
 
   _openPos (type, entry, atrValue, time) {
     const slDistance = Math.max(atrValue * this.slMultiplier, entry * 0.001);
-    const qty = Math.max(1, Math.round((this.capital * this.riskPerTrade) / slDistance));
+    const marginUsed = Math.max(0, this.capital);
+    const qty = Math.max(0.000001, marginUsed / entry);
     const sl = type === 'long' ? entry - slDistance : entry + slDistance;
     const tp = type === 'long' ? entry + atrValue * this.tpMultiplier : entry - atrValue * this.tpMultiplier;
     const entryFeePct = type === 'long' ? this.buyFeePct : this.sellFeePct;
     const entryFee = entry * qty * entryFeePct;
-    this.position = { type, entry, sl, tp, trailSl: sl, qty, entryFee, entryTime: time, timeframe: this.timeframe, strategyKey: this.strategyKey };
+    this.position = { type, entry, sl, tp, trailSl: sl, qty, lotSize: qty, marginUsed, entryFee, entryTime: time, timeframe: this.timeframe, strategyKey: this.strategyKey };
     this.emit('position_opened', { ...this.position });
   }
 
   _closePos (exitPrice, exitTime, reason) {
     if (!this.position) return;
-    const { type, entry, qty, entryTime, sl, tp, entryFee } = this.position;
+    const { type, entry, qty, lotSize, marginUsed, entryTime, sl, tp, entryFee } = this.position;
     const exitFeePct = type === 'long' ? this.sellFeePct : this.buyFeePct;
     const exitFee = exitPrice * qty * exitFeePct;
     const gross = type === 'long' ? (exitPrice - entry) * qty : (entry - exitPrice) * qty;
@@ -337,6 +338,8 @@ class AllInOneStrategy extends EventEmitter {
       entry,
       exit: exitPrice,
       qty,
+      lotSize,
+      marginUsed,
       pnl,
       pnlPct: capitalBefore ? pnl / capitalBefore * 100 : 0,
       entryTime,

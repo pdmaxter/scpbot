@@ -629,7 +629,7 @@ function pineListItem (doc) {
     capital: doc.capital || 10000,
     riskPerTradePct: doc.riskPerTradePct || 2,
     lotSize: doc.lotSize || 1,
-    positionSizePct: doc.positionSizePct ?? 10,
+    positionSizePct: doc.positionSizePct ?? 100,
     minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
     profitRatioBooking: doc.profitRatioBooking ?? 1.67,
     createdAt: doc.createdAt,
@@ -712,7 +712,7 @@ function ensurePineRunner (doc) {
         capital: doc.capital || 10000,
         riskPerTradePct: doc.riskPerTradePct || 2,
         lotSize: doc.lotSize || 1,
-        positionSizePct: doc.positionSizePct ?? 10,
+        positionSizePct: doc.positionSizePct ?? 100,
         minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
         profitRatioBooking: doc.profitRatioBooking ?? 1.67,
       }),
@@ -744,7 +744,7 @@ async function setActivePineScript (doc) {
     capital: doc.capital || 10000,
     riskPerTradePct: doc.riskPerTradePct || 2,
     lotSize: doc.lotSize || 1,
-    positionSizePct: doc.positionSizePct ?? 10,
+    positionSizePct: doc.positionSizePct ?? 100,
     minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
     profitRatioBooking: doc.profitRatioBooking ?? 1.67,
   });
@@ -763,6 +763,7 @@ function applyPineRuntimeOptions (doc, body = {}) {
   if (body.riskPerTradePct !== undefined) doc.riskPerTradePct = +body.riskPerTradePct || doc.riskPerTradePct || 2;
   if (body.lotSize !== undefined) doc.lotSize = Math.max(1, Math.round(+body.lotSize || 1));
   if (body.positionSizePct !== undefined) doc.positionSizePct = Math.max(0, +body.positionSizePct || 0);
+  else if (body.lotSize !== undefined) doc.positionSizePct = Math.max(0, +body.lotSize || 0);
   if (body.minProfitBookingPct !== undefined) doc.minProfitBookingPct = Math.max(0, +body.minProfitBookingPct || 0);
   if (body.profitRatioBooking !== undefined) doc.profitRatioBooking = Math.max(0.1, +body.profitRatioBooking || 1.67);
 }
@@ -772,7 +773,7 @@ function pineStrategyOptions (doc) {
     capital: doc.capital || 10000,
     riskPerTradePct: doc.riskPerTradePct || 2,
     lotSize: doc.lotSize || 1,
-    positionSizePct: doc.positionSizePct ?? 10,
+    positionSizePct: doc.positionSizePct ?? 100,
     minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
     profitRatioBooking: doc.profitRatioBooking ?? 1.67,
   };
@@ -1192,9 +1193,11 @@ function normalizedLots (row) {
   return Number.isFinite(qty) && qty > 0 ? qty : null;
 }
 
-function normalizedMarginUsed (row) {
+function normalizedMarginUsed (row, session = null) {
   const explicit = Number(row?.marginUsed);
   if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+  const capital = Number(session?.initialCapital ?? session?.currentCapital);
+  if (Number.isFinite(capital) && capital >= 0) return capital;
   const entry = Number(row?.entry);
   const qty = Number(row?.qty);
   return Number.isFinite(entry) && Number.isFinite(qty) ? Math.abs(entry * qty) : null;
@@ -1401,7 +1404,7 @@ app.get('/api/positions', async (req, res) => {
         markPrice,
         qty: p.qty,
         lots: normalizedLots(p),
-        marginUsed: normalizedMarginUsed(p),
+        marginUsed: normalizedMarginUsed(p, session),
         sl: p.sl,
         tp: p.tp,
         trailSl: p.trailSl,
@@ -1429,7 +1432,7 @@ app.get('/api/positions', async (req, res) => {
         exit: t.exit,
         qty: t.qty,
         lots: normalizedLots(t),
-        marginUsed: normalizedMarginUsed(t),
+        marginUsed: normalizedMarginUsed(t, session),
         sl: t.sl,
         tp: t.tp,
         pnl: t.pnl,
@@ -1519,7 +1522,7 @@ app.get('/api/pine/config', async (_req, res) => {
       capital: cfg?.capital || 10000,
       riskPerTradePct: cfg?.riskPerTradePct || 2,
       lotSize: cfg?.lotSize || 1,
-      positionSizePct: cfg?.positionSizePct ?? 10,
+      positionSizePct: cfg?.positionSizePct ?? 100,
       minProfitBookingPct: cfg?.minProfitBookingPct ?? 0.5,
       profitRatioBooking: cfg?.profitRatioBooking ?? 1.67,
     });
@@ -1534,7 +1537,7 @@ app.post('/api/pine/upload', async (req, res) => {
       capital,
       risk,
       lotSize = 1,
-      positionSizePct = 0,
+      positionSizePct = 100,
       minProfitBookingPct = 0.5,
       profitRatioBooking = 1.67,
       autoStart = false,
@@ -1546,7 +1549,7 @@ app.post('/api/pine/upload', async (req, res) => {
     const safeCapital = +capital || 10000;
     const safeRisk = +risk || 2;
     const safeLotSize = Math.max(1, Math.round(+lotSize || 1));
-    const safePositionSizePct = Math.max(0, +positionSizePct || 0);
+    const safePositionSizePct = Math.max(0, +positionSizePct || 100);
     const safeMinProfitBookingPct = Math.max(0, +minProfitBookingPct || 0);
     const safeProfitRatioBooking = Math.max(0.1, +profitRatioBooking || 1.67);
     const temp = new PineScriptStrategy({
@@ -1789,7 +1792,7 @@ app.post('/api/pine/backtest', async (req, res) => {
       capital = 10000,
       risk = 2,
       lotSize = 1,
-      positionSizePct = 0,
+      positionSizePct = 100,
       minProfitBookingPct = 0.5,
       profitRatioBooking = 1.67,
     } = req.body || {};

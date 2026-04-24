@@ -9,7 +9,7 @@ class PineScriptStrategy extends EventEmitter {
     this.capital = this.initialCapital;
     this.riskPerTrade = (cfg.riskPerTradePct || 2) / 100;
     this.lotSize = Math.max(1, Math.round(Number(cfg.lotSize ?? 1) || 1));
-    this.positionSizePct = Number(cfg.positionSizePct ?? 0) / 100;
+    this.positionSizePct = Number(cfg.positionSizePct ?? 100) / 100;
     this.minProfitBookingPct = Number(cfg.minProfitBookingPct ?? 0.5) / 100;
     this.profitRatioBooking = Number(cfg.profitRatioBooking ?? 1.67);
     this.dailyProfitTarget = (cfg.dailyProfitPct || 20) / 100;
@@ -195,26 +195,31 @@ class PineScriptStrategy extends EventEmitter {
 
   _utcDate (tsMs) { return new Date(tsMs).toISOString().slice(0, 10); }
 
-  _positionQty (entry, riskPerUnit, effRisk) {
-    if (this.lotSize > 0) return this.lotSize;
-    if (this.positionSizePct > 0) return this.capital * this.positionSizePct / entry;
-    return this.capital * effRisk / riskPerUnit;
+  _marginUsed () {
+    const pct = this.positionSizePct > 0 ? this.positionSizePct : 1;
+    return Math.max(0, this.capital * pct);
+  }
+
+  _positionQty (entry, _riskPerUnit, _effRisk) {
+    const marginUsed = this._marginUsed();
+    return Math.max(0.000001, marginUsed / entry);
   }
 
   _openPos (type, entry, sl, tp, qty, time) {
-    this.position = { type, entry, sl, tp, trailSl: sl, qty, lotSize: this.lotSize, entryTime: time };
+    const marginUsed = this._marginUsed();
+    this.position = { type, entry, sl, tp, trailSl: sl, qty, lotSize: qty, marginUsed, entryTime: time };
     this.emit('position_opened', { ...this.position });
   }
 
   _closePos (exitPrice, exitTime, reason) {
     if (!this.position) return;
-    const { type, entry, qty, entryTime, sl, tp } = this.position;
+    const { type, entry, qty, lotSize, marginUsed, entryTime, sl, tp } = this.position;
     const pnl = type === 'long' ? (exitPrice - entry) * qty : (entry - exitPrice) * qty;
     const capitalBefore = this.capital;
     this.capital += pnl;
     if (this.equityHistory.length > 0) this.equityHistory[this.equityHistory.length - 1].equity = this.capital;
     const trade = {
-      id: this.trades.length + 1, type, entry, exit: exitPrice, qty,
+      id: this.trades.length + 1, type, entry, exit: exitPrice, qty, lotSize, marginUsed,
       pnl, pnlPct: pnl / capitalBefore * 100,
       entryTime, exitTime, reason, sl, tp,
     };

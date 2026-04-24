@@ -238,7 +238,8 @@ class UTBotStrategy extends EventEmitter {
   }
 
   _openPos (type, entry, trailSl, time) {
-    const qty = Math.max(0.000001, this.capital / entry);
+    const marginUsed = Math.max(0, this.capital);
+    const qty = Math.max(0.000001, marginUsed / entry);
     const entryFeePct = type === 'long' ? this.buyFeePct : this.sellFeePct;
     const entryFee = entry * qty * entryFeePct;
     this.position = {
@@ -248,6 +249,8 @@ class UTBotStrategy extends EventEmitter {
       tp: null,
       trailSl,
       qty,
+      lotSize: qty,
+      marginUsed,
       entryFee,
       entryTime: time,
       timeframe: this.timeframe,
@@ -257,7 +260,7 @@ class UTBotStrategy extends EventEmitter {
 
   _closePos (exitPrice, exitTime, reason) {
     if (!this.position) return;
-    const { type, entry, qty, entryTime, sl, entryFee } = this.position;
+    const { type, entry, qty, lotSize, marginUsed, entryTime, sl, entryFee } = this.position;
     const exitFeePct = type === 'long' ? this.sellFeePct : this.buyFeePct;
     const exitFee = exitPrice * qty * exitFeePct;
     const gross = type === 'long' ? (exitPrice - entry) * qty : (entry - exitPrice) * qty;
@@ -271,6 +274,8 @@ class UTBotStrategy extends EventEmitter {
       entry,
       exit: exitPrice,
       qty,
+      lotSize,
+      marginUsed,
       pnl,
       pnlPct: capitalBefore ? pnl / capitalBefore * 100 : 0,
       entryTime,
