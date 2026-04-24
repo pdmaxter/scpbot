@@ -142,7 +142,7 @@ tr:last-child td{border-bottom:0}
         </div>
         <div class="panel-body">
           <div id="script-list" class="script-list"><div class="empty">Loading saved Pine scripts...</div></div>
-          <div class="grid2" style="margin-top:10px">
+          <div class="grid3" style="margin-top:10px">
             <div class="field">
               <label class="label" for="capital">Capital</label>
               <input class="inp" id="capital" type="number" value="10000" min="100" step="100">
@@ -150,6 +150,10 @@ tr:last-child td{border-bottom:0}
             <div class="field">
               <label class="label" for="risk">Risk per trade %</label>
               <input class="inp" id="risk" type="number" value="2" min="0.1" max="20" step="0.1">
+            </div>
+            <div class="field">
+              <label class="label" for="leverage">Leverage</label>
+              <input class="inp" id="leverage" type="number" value="1" min="1" step="1">
             </div>
           </div>
           <div class="grid3" style="margin-top:8px">
@@ -285,7 +289,7 @@ tr:last-child td{border-bottom:0}
         <label class="label" for="script-name">Script name</label>
         <input class="inp" id="script-name" value="Uploaded Pine Strategy">
       </div>
-      <div class="grid2" style="margin-top:8px">
+      <div class="grid3" style="margin-top:8px">
         <div class="field">
           <label class="label" for="editor-capital">Capital</label>
           <input class="inp" id="editor-capital" type="number" value="10000" min="100" step="100">
@@ -293,6 +297,10 @@ tr:last-child td{border-bottom:0}
         <div class="field">
           <label class="label" for="editor-risk">Risk per trade %</label>
           <input class="inp" id="editor-risk" type="number" value="2" min="0.1" max="20" step="0.1">
+        </div>
+        <div class="field">
+          <label class="label" for="editor-leverage">Leverage</label>
+          <input class="inp" id="editor-leverage" type="number" value="1" min="1" step="1">
         </div>
       </div>
       <div class="grid3" style="margin-top:8px">
@@ -379,12 +387,14 @@ async function api (path, opts = {}) {
 function getRuntimeOptions (prefix = '') {
   const capEl = $(prefix ? `${prefix}-capital` : 'capital');
   const riskEl = $(prefix ? `${prefix}-risk` : 'risk');
+  const levEl = $(prefix ? `${prefix}-leverage` : 'leverage');
   const sizeEl = $(prefix ? `${prefix}-lot-size` : 'lot-size');
   const minProfitEl = $(prefix ? `${prefix}-min-profit-booking` : 'min-profit-booking');
   const ratioEl = $(prefix ? `${prefix}-profit-ratio-booking` : 'profit-ratio-booking');
   return {
     capital: Number(capEl?.value) || 10000,
     risk: Number(riskEl?.value) || 2,
+    leverage: Math.max(1, Number(levEl?.value) || 1),
     positionSizePct: Math.max(1, Math.min(100, Number(sizeEl?.value) || 100)),
     minProfitBookingPct: Number(minProfitEl?.value) || 0,
     profitRatioBooking: Number(ratioEl?.value) || 1.67,
@@ -393,11 +403,13 @@ function getRuntimeOptions (prefix = '') {
 function setRuntimeOptions (opts = {}, prefix = '') {
   const capEl = $(prefix ? `${prefix}-capital` : 'capital');
   const riskEl = $(prefix ? `${prefix}-risk` : 'risk');
+  const levEl = $(prefix ? `${prefix}-leverage` : 'leverage');
   const sizeEl = $(prefix ? `${prefix}-lot-size` : 'lot-size');
   const minProfitEl = $(prefix ? `${prefix}-min-profit-booking` : 'min-profit-booking');
   const ratioEl = $(prefix ? `${prefix}-profit-ratio-booking` : 'profit-ratio-booking');
   if (capEl) capEl.value = opts.capital || 10000;
   if (riskEl) riskEl.value = opts.riskPerTradePct || opts.risk || 2;
+  if (levEl) levEl.value = opts.leverage || 1;
   if (sizeEl) sizeEl.value = opts.positionSizePct ?? 100;
   if (minProfitEl) minProfitEl.value = opts.minProfitBookingPct ?? 0.5;
   if (ratioEl) ratioEl.value = opts.profitRatioBooking ?? 1.67;
@@ -741,6 +753,7 @@ function updatePineConfig ({
   risk,
   lotSize,
   positionSizePct,
+  leverage,
   minProfitBookingPct,
   profitRatioBooking,
 } = {}) {
@@ -753,10 +766,10 @@ function updatePineConfig ({
   if (meta !== undefined) selectedChartMeta = meta || {};
   if (
     capital !== undefined || riskPerTradePct !== undefined || risk !== undefined ||
-    lotSize !== undefined || positionSizePct !== undefined || minProfitBookingPct !== undefined ||
+    lotSize !== undefined || positionSizePct !== undefined || leverage !== undefined || minProfitBookingPct !== undefined ||
     profitRatioBooking !== undefined
   ) {
-    setRuntimeOptions({ capital, riskPerTradePct, risk, positionSizePct: positionSizePct ?? lotSize, minProfitBookingPct, profitRatioBooking });
+    setRuntimeOptions({ capital, riskPerTradePct, risk, leverage, positionSizePct: positionSizePct ?? lotSize, minProfitBookingPct, profitRatioBooking });
   }
   const selected = selectedScript();
   if (selected) setRuntimeOptions(selected);
@@ -785,6 +798,7 @@ function renderScripts (scripts = pineScripts) {
         s.meta?.shortCondition ? 'Short' : null,
         'Paper',
         s.capital ? `Cap ${fmtUSD(s.capital)}` : null,
+        `Lev ${Number(s.leverage || 1).toFixed(0)}x`,
         (s.positionSizePct ?? null) !== null ? `Margin ${Number(s.positionSizePct).toFixed(0)}%` : null,
         s.minProfitBookingPct !== undefined ? `Min ${Number(s.minProfitBookingPct).toFixed(2)}%` : null,
         s.profitRatioBooking !== undefined ? `RR ${Number(s.profitRatioBooking).toFixed(2)}` : null,

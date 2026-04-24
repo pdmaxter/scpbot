@@ -42,6 +42,10 @@ const marginUsedValue = payload => {
   const qty = Number(payload?.qty);
   return Number.isFinite(entry) && Number.isFinite(qty) ? Math.abs(entry * qty) : null;
 };
+const leverageValue = payload => {
+  const explicit = Number(payload?.leverage);
+  return Number.isFinite(explicit) && explicit > 0 ? explicit : 1;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  StrategyRunner — wraps one strategy instance with independent lifecycle
@@ -91,6 +95,7 @@ class StrategyRunner {
             ...pos,
             lotSize: lotSizeValue(pos),
             marginUsed: marginUsedValue(pos),
+            leverage: leverageValue(pos),
             sessionId: this.sessionId,
           },
           { upsert: true, new: true }
@@ -113,7 +118,7 @@ class StrategyRunner {
       await Trade.create({
         sessionId: this.sessionId,
         tradeNum: trade.id, type: trade.type, entry: trade.entry,
-        exit: trade.exit, qty: trade.qty, lotSize: lotSizeValue(trade), marginUsed: marginUsedValue(trade),
+        exit: trade.exit, qty: trade.qty, lotSize: lotSizeValue(trade), marginUsed: marginUsedValue(trade), leverage: leverageValue(trade),
         pnl: trade.pnl, pnlPct: trade.pnlPct,
         entryTime: trade.entryTime, exitTime: trade.exitTime,
         reason: trade.reason, sl: trade.sl, tp: trade.tp,

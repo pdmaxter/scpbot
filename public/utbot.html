@@ -50,9 +50,10 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var
         <div class="panel-head"><div class="panel-title">UT Bot Settings</div><div class="muted" id="session-badge">No session</div></div>
         <div class="panel-body">
           <div id="status-card" class="status-card muted">Loads BUY/SELL signals from UT Bot logic. Opposite signal closes the running trade; trailing SL stays active.</div>
-          <div class="grid2" style="margin-top:10px">
+          <div class="grid3" style="margin-top:10px">
             <div class="field"><label class="label" for="timeframe">Timeframe</label><select class="inp" id="timeframe"><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option></select></div>
             <div class="field"><label class="label" for="capital">Total capital</label><input class="inp" id="capital" type="number" min="100" step="100" value="1000"></div>
+            <div class="field"><label class="label" for="leverage">Leverage</label><input class="inp" id="leverage" type="number" min="1" step="1" value="1"></div>
           </div>
           <div class="grid2" style="margin-top:8px">
             <div class="field"><label class="label" for="buy-fee">Platform buy fee %</label><input class="inp" id="buy-fee" type="number" min="0" step="0.01" value="0"></div>
@@ -219,6 +220,7 @@ function settings () {
   return {
     timeframe: $('timeframe').value,
     capital: Number($('capital').value) || 1000,
+    leverage: Math.max(1, Number($('leverage').value) || 1),
     keyValue: Number($('key-value').value) || 1,
     atrPeriod: Number($('atr-period').value) || 10,
     useHeikinAshi: $('heikin-enabled').checked,
@@ -229,6 +231,7 @@ function settings () {
 function setSettings (s = {}) {
   $('timeframe').value = s.timeframe || '5m';
   $('capital').value = s.capital || 1000;
+  $('leverage').value = s.leverage || 1;
   $('key-value').value = s.keyValue || 1;
   $('atr-period').value = s.atrPeriod || 10;
   $('heikin-enabled').checked = Boolean(s.useHeikinAshi);
@@ -268,7 +271,7 @@ function applyState (next = {}) {
   updateStatus(next.status || {});
   applySessionInfo(next.session);
   applyStats(next.stats || {});
-  $('status-card').innerHTML = `<b>${esc(next.name || 'UT Bot Alerts')}</b><br><span class="muted">${esc(next.timeframe || '5m')} / Capital ${fmtUSD(next.capital)} / Fees B ${Number(next.buyFeePct || 0).toFixed(2)}% S ${Number(next.sellFeePct || 0).toFixed(2)}%</span>`;
+  $('status-card').innerHTML = `<b>${esc(next.name || 'UT Bot Alerts')}</b><br><span class="muted">${esc(next.timeframe || '5m')} / Capital ${fmtUSD(next.capital)} / Leverage ${Number(next.leverage || 1).toFixed(0)}x / Fees B ${Number(next.buyFeePct || 0).toFixed(2)}% S ${Number(next.sellFeePct || 0).toFixed(2)}%</span>`;
 }
 function applySessionInfo (info) { $('session-badge').textContent = !info ? 'No session' : (!info.isRunning ? 'STOPPED' : 'RUNNING'); }
 function applyStats (stats = {}) {

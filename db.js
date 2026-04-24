@@ -43,6 +43,7 @@ const tradeSchema = new mongoose.Schema({
   qty:        Number,
   lotSize:    Number,
   marginUsed: Number,
+  leverage:   Number,
   pnl:        Number,
   pnlPct:     Number,
   entryTime:  Number,   // Unix ms
@@ -92,6 +93,7 @@ const positionSchema = new mongoose.Schema({
   qty:        Number,
   lotSize:    Number,
   marginUsed: Number,
+  leverage:   Number,
   entryTime:  Number,
 }, { timestamps: true });
 
@@ -106,7 +108,8 @@ const pineScriptSchema = new mongoose.Schema({
   capital:  { type: Number, default: 10000 },
   riskPerTradePct: { type: Number, default: 2 },
   lotSize: { type: Number, default: 1 },
-  positionSizePct: { type: Number, default: 10 },
+  positionSizePct: { type: Number, default: 100 },
+  leverage: { type: Number, default: 1 },
   minProfitBookingPct: { type: Number, default: 0.5 },
   profitRatioBooking: { type: Number, default: 1.67 },
   isActive: { type: Boolean, default: false, index: true },
@@ -120,6 +123,7 @@ const allInOneStrategySchema = new mongoose.Schema({
   name:     { type: String, required: true },
   timeframe:{ type: String, default: '5m' },
   capital:  { type: Number, default: 1000 },
+  leverage: { type: Number, default: 1 },
   buyFeePct: { type: Number, default: 0 },
   sellFeePct: { type: Number, default: 0 },
   riskPerTradePct: { type: Number, default: 1 },
@@ -138,6 +142,7 @@ const utBotConfigSchema = new mongoose.Schema({
   name:     { type: String, default: 'UT Bot Alerts' },
   timeframe:{ type: String, default: '5m' },
   capital:  { type: Number, default: 1000 },
+  leverage: { type: Number, default: 1 },
   keyValue: { type: Number, default: 1 },
   atrPeriod:{ type: Number, default: 10 },
   useHeikinAshi: { type: Boolean, default: false },

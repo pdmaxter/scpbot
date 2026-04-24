@@ -630,6 +630,7 @@ function pineListItem (doc) {
     riskPerTradePct: doc.riskPerTradePct || 2,
     lotSize: doc.lotSize || 1,
     positionSizePct: doc.positionSizePct ?? 100,
+    leverage: doc.leverage || 1,
     minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
     profitRatioBooking: doc.profitRatioBooking ?? 1.67,
     createdAt: doc.createdAt,
@@ -713,6 +714,7 @@ function ensurePineRunner (doc) {
         riskPerTradePct: doc.riskPerTradePct || 2,
         lotSize: doc.lotSize || 1,
         positionSizePct: doc.positionSizePct ?? 100,
+        leverage: doc.leverage || 1,
         minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
         profitRatioBooking: doc.profitRatioBooking ?? 1.67,
       }),
@@ -745,6 +747,7 @@ async function setActivePineScript (doc) {
     riskPerTradePct: doc.riskPerTradePct || 2,
     lotSize: doc.lotSize || 1,
     positionSizePct: doc.positionSizePct ?? 100,
+    leverage: doc.leverage || 1,
     minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
     profitRatioBooking: doc.profitRatioBooking ?? 1.67,
   });
@@ -764,6 +767,7 @@ function applyPineRuntimeOptions (doc, body = {}) {
   if (body.lotSize !== undefined) doc.lotSize = Math.max(1, Math.round(+body.lotSize || 1));
   if (body.positionSizePct !== undefined) doc.positionSizePct = Math.max(0, +body.positionSizePct || 0);
   else if (body.lotSize !== undefined) doc.positionSizePct = Math.max(0, +body.lotSize || 0);
+  if (body.leverage !== undefined) doc.leverage = Math.max(1, Number(body.leverage) || 1);
   if (body.minProfitBookingPct !== undefined) doc.minProfitBookingPct = Math.max(0, +body.minProfitBookingPct || 0);
   if (body.profitRatioBooking !== undefined) doc.profitRatioBooking = Math.max(0.1, +body.profitRatioBooking || 1.67);
 }
@@ -774,6 +778,7 @@ function pineStrategyOptions (doc) {
     riskPerTradePct: doc.riskPerTradePct || 2,
     lotSize: doc.lotSize || 1,
     positionSizePct: doc.positionSizePct ?? 100,
+    leverage: doc.leverage || 1,
     minProfitBookingPct: doc.minProfitBookingPct ?? 0.5,
     profitRatioBooking: doc.profitRatioBooking ?? 1.67,
   };
@@ -789,6 +794,7 @@ function allInOneDefaultConfig (def) {
     name: def.name,
     timeframe: '5m',
     capital: 1000,
+    leverage: 1,
     buyFeePct: 0,
     sellFeePct: 0,
     ...ALL_IN_ONE_AUTO_RISK,
@@ -814,6 +820,7 @@ function allInOneListItem (doc) {
     name: doc.name,
     timeframe: doc.timeframe || '5m',
     capital: doc.capital || 1000,
+    leverage: doc.leverage || 1,
     buyFeePct: doc.buyFeePct || 0,
     sellFeePct: doc.sellFeePct || 0,
     riskPerTradePct: doc.riskPerTradePct || 1,
@@ -831,6 +838,7 @@ function allInOneStrategyOptions (doc) {
     strategyKey: doc.key,
     timeframe: TIMEFRAME_MS[doc.timeframe] ? doc.timeframe : '5m',
     capital: doc.capital || 1000,
+    leverage: doc.leverage || 1,
     buyFeePct: doc.buyFeePct || 0,
     sellFeePct: doc.sellFeePct || 0,
     ...ALL_IN_ONE_AUTO_RISK,
@@ -840,6 +848,7 @@ function allInOneStrategyOptions (doc) {
 function applyAllInOneRuntimeOptions (doc, body = {}) {
   if (body.timeframe !== undefined && TIMEFRAME_MS[String(body.timeframe)]) doc.timeframe = String(body.timeframe);
   if (body.capital !== undefined) doc.capital = Math.max(100, Number(body.capital) || doc.capital || 1000);
+  if (body.leverage !== undefined) doc.leverage = Math.max(1, Number(body.leverage) || 1);
   if (body.buyFeePct !== undefined) doc.buyFeePct = Math.max(0, Number(body.buyFeePct) || 0);
   if (body.sellFeePct !== undefined) doc.sellFeePct = Math.max(0, Number(body.sellFeePct) || 0);
   Object.assign(doc, ALL_IN_ONE_AUTO_RISK);
@@ -884,6 +893,7 @@ function commonAllInOneSettings (doc) {
   return {
     timeframe: doc?.timeframe || '5m',
     capital: doc?.capital || 1000,
+    leverage: doc?.leverage || 1,
     buyFeePct: doc?.buyFeePct || 0,
     sellFeePct: doc?.sellFeePct || 0,
     autoRisk: ALL_IN_ONE_AUTO_RISK,
@@ -895,6 +905,7 @@ async function saveCommonAllInOneSettings (body = {}) {
   const patch = {
     timeframe: TIMEFRAME_MS[String(body.timeframe)] ? String(body.timeframe) : '5m',
     capital: Math.max(100, Number(body.capital) || 1000),
+    leverage: Math.max(1, Number(body.leverage) || 1),
     buyFeePct: Math.max(0, Number(body.buyFeePct) || 0),
     sellFeePct: Math.max(0, Number(body.sellFeePct) || 0),
     ...ALL_IN_ONE_AUTO_RISK,
@@ -903,11 +914,13 @@ async function saveCommonAllInOneSettings (body = {}) {
   for (const runner of allInOneRunners.values()) {
     runner.strategy.buyFeePct = patch.buyFeePct / 100;
     runner.strategy.sellFeePct = patch.sellFeePct / 100;
+    runner.strategy.leverage = patch.leverage;
     if (!runner.running) {
       runner.strategy.reset({
         strategyKey: runner.strategy.strategyKey,
         timeframe: patch.timeframe,
         capital: patch.capital,
+        leverage: patch.leverage,
         buyFeePct: patch.buyFeePct,
         sellFeePct: patch.sellFeePct,
         ...ALL_IN_ONE_AUTO_RISK,
@@ -929,6 +942,7 @@ function utBotDefaultConfig () {
     name: 'UT Bot Alerts',
     timeframe: '5m',
     capital: 1000,
+    leverage: 1,
     keyValue: 1,
     atrPeriod: 10,
     useHeikinAshi: false,
@@ -952,6 +966,7 @@ async function ensureUTBotConfig () {
 function applyUTBotRuntimeOptions (doc, body = {}) {
   if (body.timeframe !== undefined && TIMEFRAME_MS[String(body.timeframe)]) doc.timeframe = String(body.timeframe);
   if (body.capital !== undefined) doc.capital = Math.max(100, Number(body.capital) || doc.capital || 1000);
+  if (body.leverage !== undefined) doc.leverage = Math.max(1, Number(body.leverage) || 1);
   if (body.keyValue !== undefined) doc.keyValue = Math.max(0.1, Number(body.keyValue) || 1);
   if (body.atrPeriod !== undefined) doc.atrPeriod = Math.max(2, Math.round(Number(body.atrPeriod) || 10));
   if (body.useHeikinAshi !== undefined) doc.useHeikinAshi = Boolean(body.useHeikinAshi);
@@ -963,6 +978,7 @@ function utBotStrategyOptions (doc) {
   return {
     timeframe: doc.timeframe || '5m',
     capital: doc.capital || 1000,
+    leverage: doc.leverage || 1,
     keyValue: doc.keyValue || 1,
     atrPeriod: doc.atrPeriod || 10,
     useHeikinAshi: Boolean(doc.useHeikinAshi),
@@ -977,6 +993,7 @@ function utBotConfigView (doc) {
     name: doc.name || 'UT Bot Alerts',
     timeframe: doc.timeframe || '5m',
     capital: doc.capital || 1000,
+    leverage: doc.leverage || 1,
     keyValue: doc.keyValue || 1,
     atrPeriod: doc.atrPeriod || 10,
     useHeikinAshi: Boolean(doc.useHeikinAshi),
@@ -1032,6 +1049,7 @@ async function resetRunnerToConfiguredState (runner) {
       riskPerTradePct: Math.max(0.1, Number(runner.strategy.riskPerTrade || 0.02) * 100),
       lotSize: runner.strategy.lotSize || 1,
       positionSizePct: Number(runner.strategy.positionSizePct || 0) * 100,
+      leverage: Number(runner.strategy.leverage || 1),
       minProfitBookingPct: Number(runner.strategy.minProfitBookingPct || 0.005) * 100,
       profitRatioBooking: runner.strategy.profitRatioBooking || 1.67,
     });
@@ -1405,6 +1423,7 @@ app.get('/api/positions', async (req, res) => {
         qty: p.qty,
         lots: normalizedLots(p),
         marginUsed: normalizedMarginUsed(p, session),
+        leverage: Number(p.leverage) || 1,
         sl: p.sl,
         tp: p.tp,
         trailSl: p.trailSl,
@@ -1433,6 +1452,7 @@ app.get('/api/positions', async (req, res) => {
         qty: t.qty,
         lots: normalizedLots(t),
         marginUsed: normalizedMarginUsed(t, session),
+        leverage: Number(t.leverage) || 1,
         sl: t.sl,
         tp: t.tp,
         pnl: t.pnl,
@@ -1523,6 +1543,7 @@ app.get('/api/pine/config', async (_req, res) => {
       riskPerTradePct: cfg?.riskPerTradePct || 2,
       lotSize: cfg?.lotSize || 1,
       positionSizePct: cfg?.positionSizePct ?? 100,
+      leverage: cfg?.leverage || 1,
       minProfitBookingPct: cfg?.minProfitBookingPct ?? 0.5,
       profitRatioBooking: cfg?.profitRatioBooking ?? 1.67,
     });
@@ -1538,6 +1559,7 @@ app.post('/api/pine/upload', async (req, res) => {
       risk,
       lotSize = 1,
       positionSizePct = 100,
+      leverage = 1,
       minProfitBookingPct = 0.5,
       profitRatioBooking = 1.67,
       autoStart = false,
@@ -1550,6 +1572,7 @@ app.post('/api/pine/upload', async (req, res) => {
     const safeRisk = +risk || 2;
     const safeLotSize = Math.max(1, Math.round(+lotSize || 1));
     const safePositionSizePct = Math.max(0, +positionSizePct || 100);
+    const safeLeverage = Math.max(1, Number(leverage) || 1);
     const safeMinProfitBookingPct = Math.max(0, +minProfitBookingPct || 0);
     const safeProfitRatioBooking = Math.max(0.1, +profitRatioBooking || 1.67);
     const temp = new PineScriptStrategy({
@@ -1559,6 +1582,7 @@ app.post('/api/pine/upload', async (req, res) => {
       riskPerTradePct: safeRisk,
       lotSize: safeLotSize,
       positionSizePct: safePositionSizePct,
+      leverage: safeLeverage,
       minProfitBookingPct: safeMinProfitBookingPct,
       profitRatioBooking: safeProfitRatioBooking,
     });
@@ -1571,6 +1595,7 @@ app.post('/api/pine/upload', async (req, res) => {
       riskPerTradePct: safeRisk,
       lotSize: safeLotSize,
       positionSizePct: safePositionSizePct,
+      leverage: safeLeverage,
       minProfitBookingPct: safeMinProfitBookingPct,
       profitRatioBooking: safeProfitRatioBooking,
       isActive: Boolean(setActive || autoStart),
@@ -1584,6 +1609,7 @@ app.post('/api/pine/upload', async (req, res) => {
         riskPerTradePct: safeRisk,
         lotSize: safeLotSize,
         positionSizePct: safePositionSizePct,
+        leverage: safeLeverage,
         minProfitBookingPct: safeMinProfitBookingPct,
         profitRatioBooking: safeProfitRatioBooking,
       });
@@ -1602,6 +1628,7 @@ app.post('/api/pine/upload', async (req, res) => {
       riskPerTradePct: safeRisk,
       lotSize: safeLotSize,
       positionSizePct: safePositionSizePct,
+      leverage: safeLeverage,
       minProfitBookingPct: safeMinProfitBookingPct,
       profitRatioBooking: safeProfitRatioBooking,
       autoStarted: Boolean(autoStart),
@@ -1661,7 +1688,7 @@ app.post('/api/pine/scripts/:id/start', async (req, res) => {
     const runner = await setActivePineScript(doc);
     if (
       req.body?.capital || req.body?.risk ||
-      req.body?.lotSize !== undefined || req.body?.positionSizePct !== undefined || req.body?.minProfitBookingPct !== undefined ||
+      req.body?.lotSize !== undefined || req.body?.positionSizePct !== undefined || req.body?.leverage !== undefined || req.body?.minProfitBookingPct !== undefined ||
       req.body?.profitRatioBooking !== undefined
     ) {
       await runner.reset(pineStrategyOptions(doc));
@@ -1793,6 +1820,7 @@ app.post('/api/pine/backtest', async (req, res) => {
       risk = 2,
       lotSize = 1,
       positionSizePct = 100,
+      leverage = 1,
       minProfitBookingPct = 0.5,
       profitRatioBooking = 1.67,
     } = req.body || {};
@@ -1825,6 +1853,7 @@ app.post('/api/pine/backtest', async (req, res) => {
       riskPerTradePct: +risk,
       lotSize: +lotSize,
       positionSizePct: +positionSizePct,
+      leverage: +leverage,
       minProfitBookingPct: +minProfitBookingPct,
       profitRatioBooking: +profitRatioBooking,
     });

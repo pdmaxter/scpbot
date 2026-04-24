@@ -20,6 +20,7 @@ class UTBotStrategy extends EventEmitter {
     this.keyValue = Number(cfg.keyValue || 1);
     this.atrPeriod = Math.max(2, Math.round(Number(cfg.atrPeriod || 10)));
     this.useHeikinAshi = Boolean(cfg.useHeikinAshi);
+    this.leverage = Math.max(1, Number(cfg.leverage || 1));
     this.buyFeePct = Math.max(0, Number(cfg.buyFeePct || 0)) / 100;
     this.sellFeePct = Math.max(0, Number(cfg.sellFeePct || 0)) / 100;
     this.minBars = Math.max(60, this.atrPeriod + 20);
@@ -35,6 +36,7 @@ class UTBotStrategy extends EventEmitter {
     if (cfg.keyValue !== undefined) this.keyValue = Math.max(0.1, Number(cfg.keyValue) || 1);
     if (cfg.atrPeriod !== undefined) this.atrPeriod = Math.max(2, Math.round(Number(cfg.atrPeriod) || 10));
     if (cfg.useHeikinAshi !== undefined) this.useHeikinAshi = Boolean(cfg.useHeikinAshi);
+    if (cfg.leverage !== undefined) this.leverage = Math.max(1, Number(cfg.leverage) || 1);
     if (cfg.buyFeePct !== undefined) this.buyFeePct = Math.max(0, Number(cfg.buyFeePct) || 0) / 100;
     if (cfg.sellFeePct !== undefined) this.sellFeePct = Math.max(0, Number(cfg.sellFeePct) || 0) / 100;
     this.minBars = Math.max(60, this.atrPeriod + 20);
@@ -168,6 +170,10 @@ class UTBotStrategy extends EventEmitter {
     if (this.position) {
       const p = this.position;
       if (p.type === 'long') {
+        if (p.liquidationPrice && candle.low <= p.liquidationPrice) {
+          this._closePos(p.liquidationPrice, candle.openTime, 'liquidation');
+          return this._state();
+        }
         p.trailSl = Math.max(p.trailSl, signal.stop);
         if (signal.sell) {
           this._closePos(candle.close, candle.openTime, 'opposite_sell_signal');
@@ -179,6 +185,10 @@ class UTBotStrategy extends EventEmitter {
           return this._state();
         }
       } else {
+        if (p.liquidationPrice && candle.high >= p.liquidationPrice) {
+          this._closePos(p.liquidationPrice, candle.openTime, 'liquidation');
+          return this._state();
+        }
         p.trailSl = Math.min(p.trailSl, signal.stop);
         if (signal.buy) {
           this._closePos(candle.close, candle.openTime, 'opposite_buy_signal');
@@ -237,9 +247,16 @@ class UTBotStrategy extends EventEmitter {
     };
   }
 
+  _liquidationPrice (type, entry) {
+    if (!entry || !this.leverage) return null;
+    return type === 'short'
+      ? entry * (1 + 1 / this.leverage)
+      : entry * Math.max(0, 1 - 1 / this.leverage);
+  }
+
   _openPos (type, entry, trailSl, time) {
     const marginUsed = Math.max(0, this.capital);
-    const qty = Math.max(0.000001, marginUsed / entry);
+    const qty = Math.max(0.000001, (marginUsed * this.leverage) / entry);
     const entryFeePct = type === 'long' ? this.buyFeePct : this.sellFeePct;
     const entryFee = entry * qty * entryFeePct;
     this.position = {
@@ -251,6 +268,8 @@ class UTBotStrategy extends EventEmitter {
       qty,
       lotSize: qty,
       marginUsed,
+      leverage: this.leverage,
+      liquidationPrice: this._liquidationPrice(type, entry),
       entryFee,
       entryTime: time,
       timeframe: this.timeframe,
@@ -260,13 +279,13 @@ class UTBotStrategy extends EventEmitter {
 
   _closePos (exitPrice, exitTime, reason) {
     if (!this.position) return;
-    const { type, entry, qty, lotSize, marginUsed, entryTime, sl, entryFee } = this.position;
+    const { type, entry, qty, lotSize, marginUsed, leverage, entryTime, sl, entryFee } = this.position;
     const exitFeePct = type === 'long' ? this.sellFeePct : this.buyFeePct;
     const exitFee = exitPrice * qty * exitFeePct;
     const gross = type === 'long' ? (exitPrice - entry) * qty : (entry - exitPrice) * qty;
     const pnl = gross - (entryFee || 0) - exitFee;
     const capitalBefore = this.capital;
-    this.capital += pnl;
+    this.capital = Math.max(0, this.capital + pnl);
     if (this.equityHistory.length) this.equityHistory[this.equityHistory.length - 1].equity = this.capital;
     const trade = {
       id: this.trades.length + 1,
@@ -276,6 +295,7 @@ class UTBotStrategy extends EventEmitter {
       qty,
       lotSize,
       marginUsed,
+      leverage,
       pnl,
       pnlPct: capitalBefore ? pnl / capitalBefore * 100 : 0,
       entryTime,
@@ -313,6 +333,7 @@ class UTBotStrategy extends EventEmitter {
         keyValue: this.keyValue,
         atrPeriod: this.atrPeriod,
         useHeikinAshi: this.useHeikinAshi,
+        leverage: this.leverage,
         buyFeePct: this.buyFeePct * 100,
         sellFeePct: this.sellFeePct * 100,
       },

@@ -39,6 +39,7 @@ class AllInOneStrategy extends EventEmitter {
     this.timeframe = normalizeTimeframe(cfg.timeframe);
     this.initialCapital = Number(cfg.capital || 1000);
     this.capital = this.initialCapital;
+    this.leverage = Math.max(1, Number(cfg.leverage || 1));
     this.buyFeePct = Math.max(0, Number(cfg.buyFeePct || 0)) / 100;
     this.sellFeePct = Math.max(0, Number(cfg.sellFeePct || 0)) / 100;
     this.riskPerTrade = AUTO_RISK.riskPerTradePct / 100;
@@ -60,6 +61,7 @@ class AllInOneStrategy extends EventEmitter {
       this.capital = Number(cfg.capital) || this.initialCapital;
       this.initialCapital = this.capital;
     }
+    if (cfg.leverage !== undefined) this.leverage = Math.max(1, Number(cfg.leverage) || 1);
     if (cfg.buyFeePct !== undefined) this.buyFeePct = Math.max(0, Number(cfg.buyFeePct) || 0) / 100;
     if (cfg.sellFeePct !== undefined) this.sellFeePct = Math.max(0, Number(cfg.sellFeePct) || 0) / 100;
     this.riskPerTrade = AUTO_RISK.riskPerTradePct / 100;
@@ -193,6 +195,10 @@ class AllInOneStrategy extends EventEmitter {
         return this._state();
       }
       if (p.type === 'long') {
+        if (p.liquidationPrice && candle.low <= p.liquidationPrice) {
+          this._closePos(p.liquidationPrice, candle.openTime, 'liquidation');
+          return this._state();
+        }
         if (candle.low <= p.trailSl) {
           this._closePos(Math.max(p.trailSl, candle.open), candle.openTime, 'stop_loss');
           return this._state();
@@ -203,6 +209,10 @@ class AllInOneStrategy extends EventEmitter {
         }
         p.trailSl = Math.max(p.trailSl, candle.close - atr * this.trailOffset);
       } else {
+        if (p.liquidationPrice && candle.high >= p.liquidationPrice) {
+          this._closePos(p.liquidationPrice, candle.openTime, 'liquidation');
+          return this._state();
+        }
         if (candle.high >= p.trailSl) {
           this._closePos(Math.min(p.trailSl, candle.open), candle.openTime, 'stop_loss');
           return this._state();
@@ -313,24 +323,27 @@ class AllInOneStrategy extends EventEmitter {
   _openPos (type, entry, atrValue, time) {
     const slDistance = Math.max(atrValue * this.slMultiplier, entry * 0.001);
     const marginUsed = Math.max(0, this.capital);
-    const qty = Math.max(0.000001, marginUsed / entry);
+    const qty = Math.max(0.000001, (marginUsed * this.leverage) / entry);
     const sl = type === 'long' ? entry - slDistance : entry + slDistance;
     const tp = type === 'long' ? entry + atrValue * this.tpMultiplier : entry - atrValue * this.tpMultiplier;
     const entryFeePct = type === 'long' ? this.buyFeePct : this.sellFeePct;
     const entryFee = entry * qty * entryFeePct;
-    this.position = { type, entry, sl, tp, trailSl: sl, qty, lotSize: qty, marginUsed, entryFee, entryTime: time, timeframe: this.timeframe, strategyKey: this.strategyKey };
+    const liquidationPrice = type === 'short'
+      ? entry * (1 + 1 / this.leverage)
+      : entry * Math.max(0, 1 - 1 / this.leverage);
+    this.position = { type, entry, sl, tp, trailSl: sl, qty, lotSize: qty, marginUsed, leverage: this.leverage, liquidationPrice, entryFee, entryTime: time, timeframe: this.timeframe, strategyKey: this.strategyKey };
     this.emit('position_opened', { ...this.position });
   }
 
   _closePos (exitPrice, exitTime, reason) {
     if (!this.position) return;
-    const { type, entry, qty, lotSize, marginUsed, entryTime, sl, tp, entryFee } = this.position;
+    const { type, entry, qty, lotSize, marginUsed, leverage, entryTime, sl, tp, entryFee } = this.position;
     const exitFeePct = type === 'long' ? this.sellFeePct : this.buyFeePct;
     const exitFee = exitPrice * qty * exitFeePct;
     const gross = type === 'long' ? (exitPrice - entry) * qty : (entry - exitPrice) * qty;
     const pnl = gross - (entryFee || 0) - exitFee;
     const capitalBefore = this.capital;
-    this.capital += pnl;
+    this.capital = Math.max(0, this.capital + pnl);
     if (this.equityHistory.length) this.equityHistory[this.equityHistory.length - 1].equity = this.capital;
     const trade = {
       id: this.trades.length + 1,
@@ -340,6 +353,7 @@ class AllInOneStrategy extends EventEmitter {
       qty,
       lotSize,
       marginUsed,
+      leverage,
       pnl,
       pnlPct: capitalBefore ? pnl / capitalBefore * 100 : 0,
       entryTime,
@@ -370,6 +384,7 @@ class AllInOneStrategy extends EventEmitter {
       capital: this.capital,
       initialCapital: this.initialCapital,
       settings: {
+        leverage: this.leverage,
         buyFeePct: this.buyFeePct * 100,
         sellFeePct: this.sellFeePct * 100,
       },

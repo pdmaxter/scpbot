@@ -10,6 +10,7 @@ class PineScriptStrategy extends EventEmitter {
     this.riskPerTrade = (cfg.riskPerTradePct || 2) / 100;
     this.lotSize = Math.max(1, Math.round(Number(cfg.lotSize ?? 1) || 1));
     this.positionSizePct = Number(cfg.positionSizePct ?? 100) / 100;
+    this.leverage = Math.max(1, Number(cfg.leverage || 1));
     this.minProfitBookingPct = Number(cfg.minProfitBookingPct ?? 0.5) / 100;
     this.profitRatioBooking = Number(cfg.profitRatioBooking ?? 1.67);
     this.dailyProfitTarget = (cfg.dailyProfitPct || 20) / 100;
@@ -118,11 +119,17 @@ class PineScriptStrategy extends EventEmitter {
         return this._closePos(close, openTime, 'signal_flip'), this._state();
       }
       if (p.type === 'long') {
+        if (p.liquidationPrice && low <= p.liquidationPrice) {
+          return this._closePos(p.liquidationPrice, openTime, 'liquidation'), this._state();
+        }
         if (low <= p.trailSl) return this._closePos(Math.max(p.trailSl, open), openTime, 'stop_loss'), this._state();
         if (high >= p.tp) return this._closePos(p.tp, openTime, 'take_profit'), this._state();
         const nt = close - atr * trailMult;
         if (nt > p.trailSl) p.trailSl = nt;
       } else {
+        if (p.liquidationPrice && high >= p.liquidationPrice) {
+          return this._closePos(p.liquidationPrice, openTime, 'liquidation'), this._state();
+        }
         if (high >= p.trailSl) return this._closePos(Math.min(p.trailSl, open), openTime, 'stop_loss'), this._state();
         if (low <= p.tp) return this._closePos(p.tp, openTime, 'take_profit'), this._state();
         const nt = close + atr * trailMult;
@@ -173,6 +180,7 @@ class PineScriptStrategy extends EventEmitter {
     if (cfg.riskPerTradePct) this.riskPerTrade = cfg.riskPerTradePct / 100;
     if (cfg.lotSize !== undefined) this.lotSize = Math.max(1, Math.round(Number(cfg.lotSize) || 1));
     if (cfg.positionSizePct !== undefined) this.positionSizePct = Math.max(0, Number(cfg.positionSizePct) || 0) / 100;
+    if (cfg.leverage !== undefined) this.leverage = Math.max(1, Number(cfg.leverage) || 1);
     if (cfg.minProfitBookingPct !== undefined) this.minProfitBookingPct = Math.max(0, Number(cfg.minProfitBookingPct) || 0) / 100;
     if (cfg.profitRatioBooking !== undefined) this.profitRatioBooking = Math.max(0.1, Number(cfg.profitRatioBooking) || 1.67);
     this.resetState();
@@ -200,26 +208,33 @@ class PineScriptStrategy extends EventEmitter {
     return Math.max(0, this.capital * pct);
   }
 
+  _liquidationPrice (type, entry) {
+    if (!entry || !this.leverage) return null;
+    return type === 'short'
+      ? entry * (1 + 1 / this.leverage)
+      : entry * Math.max(0, 1 - 1 / this.leverage);
+  }
+
   _positionQty (entry, _riskPerUnit, _effRisk) {
     const marginUsed = this._marginUsed();
-    return Math.max(0.000001, marginUsed / entry);
+    return Math.max(0.000001, (marginUsed * this.leverage) / entry);
   }
 
   _openPos (type, entry, sl, tp, qty, time) {
     const marginUsed = this._marginUsed();
-    this.position = { type, entry, sl, tp, trailSl: sl, qty, lotSize: qty, marginUsed, entryTime: time };
+    this.position = { type, entry, sl, tp, trailSl: sl, qty, lotSize: qty, marginUsed, leverage: this.leverage, liquidationPrice: this._liquidationPrice(type, entry), entryTime: time };
     this.emit('position_opened', { ...this.position });
   }
 
   _closePos (exitPrice, exitTime, reason) {
     if (!this.position) return;
-    const { type, entry, qty, lotSize, marginUsed, entryTime, sl, tp } = this.position;
+    const { type, entry, qty, lotSize, marginUsed, leverage, entryTime, sl, tp } = this.position;
     const pnl = type === 'long' ? (exitPrice - entry) * qty : (entry - exitPrice) * qty;
     const capitalBefore = this.capital;
-    this.capital += pnl;
+    this.capital = Math.max(0, this.capital + pnl);
     if (this.equityHistory.length > 0) this.equityHistory[this.equityHistory.length - 1].equity = this.capital;
     const trade = {
-      id: this.trades.length + 1, type, entry, exit: exitPrice, qty, lotSize, marginUsed,
+      id: this.trades.length + 1, type, entry, exit: exitPrice, qty, lotSize, marginUsed, leverage,
       pnl, pnlPct: pnl / capitalBefore * 100,
       entryTime, exitTime, reason, sl, tp,
     };
@@ -253,6 +268,7 @@ class PineScriptStrategy extends EventEmitter {
       settings: {
         lotSize: this.lotSize,
         positionSizePct: this.positionSizePct * 100,
+        leverage: this.leverage,
         minProfitBookingPct: this.minProfitBookingPct * 100,
         profitRatioBooking: this.profitRatioBooking,
       },

@@ -83,9 +83,10 @@ button:disabled{opacity:.35;cursor:not-allowed}
         </div>
         <div class="panel-body">
           <div id="selected-status" class="status-card muted">Timeframe and capital apply to all 10 strategies. Positions are tracked with paper trading in local MongoDB.</div>
-          <div class="grid2" style="margin-top:10px">
+          <div class="grid3" style="margin-top:10px">
             <div class="field"><label class="label" for="timeframe">Timeframe</label><select class="inp" id="timeframe"><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option></select></div>
             <div class="field"><label class="label" for="capital">Total capital</label><input class="inp" id="capital" type="number" min="100" step="100" value="1000"></div>
+            <div class="field"><label class="label" for="leverage">Leverage</label><input class="inp" id="leverage" type="number" min="1" step="1" value="1"></div>
           </div>
           <div class="grid2" style="margin-top:8px">
             <div class="field"><label class="label" for="buy-fee-pct">Buy fee %</label><input class="inp" id="buy-fee-pct" type="number" min="0" step="0.01" value="0"></div>
@@ -224,6 +225,7 @@ function options () {
   return {
     timeframe: $('timeframe').value,
     capital: Number($('capital').value) || 1000,
+    leverage: Math.max(1, Number($('leverage').value) || 1),
     buyFeePct: Math.max(0, Number($('buy-fee-pct').value) || 0),
     sellFeePct: Math.max(0, Number($('sell-fee-pct').value) || 0),
   };
@@ -231,6 +233,7 @@ function options () {
 function setOptions (s = {}) {
   $('timeframe').value = s.timeframe || '5m';
   $('capital').value = s.capital || 1000;
+  $('leverage').value = s.leverage || 1;
   $('buy-fee-pct').value = s.buyFeePct || 0;
   $('sell-fee-pct').value = s.sellFeePct || 0;
   if (baseCandles.length) renderCandles(baseCandles, false);
@@ -266,6 +269,7 @@ function renderStrategies (rows = strategies) {
       s.timeframe,
       'Paper',
       `Cap ${fmtUSD(s.capital)}`,
+      `Lev ${Number(s.leverage || 1).toFixed(0)}x`,
       `Fees ${Number(s.buyFeePct || 0).toFixed(2)}%/${Number(s.sellFeePct || 0).toFixed(2)}%`,
       'Auto Target/SL',
       s.updatedAt ? fmtTime(s.updatedAt) : null,
@@ -408,7 +412,7 @@ function updateChartState () {
   const pnl = Number(latestStats.totalPnl || 0);
   $('chart-pnl-state').innerHTML = `P&L <span class="${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</span>`;
   renderChartPosition(pos);
-  $('selected-status').innerHTML = s ? `<b>${esc(s.name)}</b><br><span class="muted">${esc(s.timeframe)} / Paper / Capital ${fmtUSD(s.capital)} / Buy fee ${Number(s.buyFeePct || 0).toFixed(2)}% / Sell fee ${Number(s.sellFeePct || 0).toFixed(2)}%</span>` : 'Select a strategy.';
+  $('selected-status').innerHTML = s ? `<b>${esc(s.name)}</b><br><span class="muted">${esc(s.timeframe)} / Paper / Capital ${fmtUSD(s.capital)} / Leverage ${Number(s.leverage || 1).toFixed(0)}x / Buy fee ${Number(s.buyFeePct || 0).toFixed(2)}% / Sell fee ${Number(s.sellFeePct || 0).toFixed(2)}%</span>` : 'Select a strategy.';
 }
 function setPnlMetric (id, value) { const el = $(id); el.className = `metric-value ${pnlCls(value)}`; el.textContent = fmtUSD(value); }
 function renderPositions (data = {}) {
