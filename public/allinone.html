@@ -59,7 +59,6 @@ button:disabled{opacity:.35;cursor:not-allowed}
       <span class="pill"><span class="dot" id="run-dot"></span><span id="run-label">STOPPED</span></span>
       <span class="pill">K <span id="ws-kline" class="neg">OFF</span></span>
       <span class="pill">T <span id="ws-ticker" class="neg">OFF</span></span>
-      <a class="link-btn" href="/mt5.html">MT5</a>
       <a class="link-btn" href="/pnl.html">PNL</a>
       <a class="link-btn" href="/pine.html">Pine Upload</a>
       <form method="POST" action="/logout" style="margin:0"><button class="ghost-btn" type="submit">Logout</button></form>
@@ -118,6 +117,28 @@ button:disabled{opacity:.35;cursor:not-allowed}
           </div>
           <div id="price-chart"></div>
         </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Paper Positions / PNL</div><div class="muted" id="positions-updated-at">Waiting for local data</div></div>
+        <div class="panel-body">
+          <div class="sync-strip"><span class="pill" id="positions-bot-pill">BOTS --</span><button class="link-btn" type="button" onclick="loadPositions(true)">Refresh</button><button class="danger-btn" type="button" onclick="resetAllPaperData()">Delete All Positions</button></div>
+          <div class="positions-metrics">
+            <div class="metric"><div class="metric-label">Open</div><div class="metric-value" id="pos-open-count">0</div></div>
+            <div class="metric"><div class="metric-label">Closed</div><div class="metric-value" id="pos-closed-count">0</div></div>
+            <div class="metric"><div class="metric-label">Open PNL</div><div class="metric-value" id="pos-open-pnl">$0.00</div></div>
+            <div class="metric"><div class="metric-label">Closed PNL</div><div class="metric-value" id="pos-closed-pnl">$0.00</div></div>
+            <div class="metric"><div class="metric-label">Net PNL</div><div class="metric-value" id="pos-net-pnl">$0.00</div></div>
+          </div>
+          <div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Time</th><th>Session</th></tr></thead><tbody id="positions-open-body"><tr><td colspan="11" class="muted">No open positions.</td></tr></tbody></table></div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Closed Positions</div><div class="muted" id="positions-closed-sub">Realized PNL</div></div>
+        <div class="panel-body"><div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Reason</th><th>Exit Time</th><th>Session</th></tr></thead><tbody id="positions-closed-body"><tr><td colspan="12" class="muted">No closed positions.</td></tr></tbody></table></div></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Activity</div><button class="ghost-btn" type="button" onclick="clearLog()">Clear</button></div>
+        <div class="panel-body"><div id="log" class="log"></div></div>
       </section>
     </div>
   </main>

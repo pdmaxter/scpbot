@@ -492,6 +492,7 @@ app.use(requireAuth);
 app.get(['/', '/index.html'], (_req, res) => res.redirect('/pine.html'));
 app.get('/positions.html', (_req, res) => res.redirect('/pnl.html'));
 app.get('/utbot.html', (_req, res) => res.redirect('/pine.html'));
+app.get('/mt5.html', (_req, res) => res.redirect('/pine.html'));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '1mb' }));
 
