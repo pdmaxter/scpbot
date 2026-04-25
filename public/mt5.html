@@ -46,7 +46,6 @@ button:disabled{opacity:.35;cursor:not-allowed}
       <span class="pill mode">EXNESS DEMO</span>
       <a class="link-btn" href="/pine.html">Pine Upload</a>
       <a class="link-btn" href="/allinone.html">All-in-One</a>
-      <a class="link-btn" href="/utbot.html">UT Bot</a>
       <a class="link-btn" href="/pnl.html">PNL</a>
       <form method="POST" action="/logout" style="margin:0"><button class="ghost-btn" type="submit">Logout</button></form>
     </div>
@@ -108,10 +107,6 @@ button:disabled{opacity:.35;cursor:not-allowed}
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-head"><div class="panel-title">Activity</div><button class="ghost-btn" type="button" onclick="clearLog()">Clear</button></div>
-        <div class="panel-body"><div id="log" class="log"></div></div>
-      </section>
     </div>
   </main>
 </div>
@@ -130,14 +125,16 @@ function esc (value) {
   return String(value ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m]));
 }
 function addLog (level, msg) {
+  const log = $('log');
+  if (!log) return;
   const row = document.createElement('div');
   row.className = 'log-line';
   const cls = level === 'error' ? 'neg' : level === 'success' ? 'pos' : level === 'warn' ? 'warn' : '';
   row.innerHTML = `<div class="log-time">${fmtTime(Date.now())}</div><div class="${cls}">${esc(msg)}</div>`;
-  $('log').prepend(row);
-  while ($('log').children.length > 120) $('log').lastChild.remove();
+  log.prepend(row);
+  while (log.children.length > 120) log.lastChild.remove();
 }
-function clearLog () { $('log').innerHTML = ''; }
+function clearLog () { const log = $('log'); if (log) log.innerHTML = ''; }
 function setConfigView (cfg = {}) {
   $('enabled').checked = Boolean(cfg.enabled);
   $('server').value = cfg.server || '';

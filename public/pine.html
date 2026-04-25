@@ -127,7 +127,6 @@ tr:last-child td{border-bottom:0}
       <a class="link-btn" href="/mt5.html">MT5</a>
       <a class="link-btn" href="/pnl.html">PNL</a>
       <a class="link-btn" href="/allinone.html">All-in-One</a>
-      <a class="link-btn" href="/utbot.html">UT Bot</a>
       <form method="POST" action="/logout" style="margin:0">
         <button class="ghost-btn" type="submit">Logout</button>
       </form>
@@ -222,57 +221,6 @@ tr:last-child td{border-bottom:0}
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <div class="panel-title">Paper Positions / PNL</div>
-          <div class="muted" id="positions-updated-at">Waiting for local data</div>
-        </div>
-        <div class="panel-body">
-          <div class="sync-strip">
-            <span class="pill" id="positions-bot-pill">BOTS --</span>
-            <button class="link-btn" id="force-sync-btn" type="button" onclick="loadPaperPositions(true)">Refresh</button>
-            <button class="danger-btn" type="button" onclick="resetAllPaperData()">Delete All Positions</button>
-          </div>
-          <div class="positions-metrics">
-            <div class="metric"><div class="metric-label">Open</div><div class="metric-value" id="pos-open-count">0</div></div>
-            <div class="metric"><div class="metric-label">Closed</div><div class="metric-value" id="pos-closed-count">0</div></div>
-            <div class="metric"><div class="metric-label">Open PNL</div><div class="metric-value" id="pos-open-pnl">$0.00</div></div>
-            <div class="metric"><div class="metric-label">Closed PNL</div><div class="metric-value" id="pos-closed-pnl">$0.00</div></div>
-            <div class="metric"><div class="metric-label">Net PNL</div><div class="metric-value" id="pos-net-pnl">$0.00</div></div>
-          </div>
-          <div class="table-wrap">
-            <table class="wide-table">
-              <thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Time</th><th>Session</th></tr></thead>
-              <tbody id="positions-open-body"><tr><td colspan="11" class="muted">No open positions.</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <div class="panel-title">Closed Paper Positions</div>
-          <div class="muted" id="positions-closed-sub">Realized PNL</div>
-        </div>
-        <div class="panel-body">
-          <div class="table-wrap">
-            <table class="wide-table">
-              <thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Reason</th><th>Exit Time</th><th>Session</th></tr></thead>
-              <tbody id="positions-closed-body"><tr><td colspan="12" class="muted">No closed positions.</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <div class="panel-title">Activity</div>
-          <button class="ghost-btn" type="button" onclick="clearLog()">Clear</button>
-        </div>
-        <div class="panel-body">
-          <div id="log" class="log"></div>
-        </div>
-      </section>
     </div>
   </main>
 </div>
@@ -416,15 +364,18 @@ function setRuntimeOptions (opts = {}, prefix = '') {
   if (ratioEl) ratioEl.value = opts.profitRatioBooking ?? 1.67;
 }
 function addLog (level, msg) {
+  const log = $('log');
+  if (!log) return;
   const row = document.createElement('div');
   row.className = 'log-line';
   const cls = level === 'error' ? 'neg' : level === 'success' ? 'pos' : level === 'warn' ? 'warn' : '';
   row.innerHTML = `<div class="log-time">${fmtDT(Date.now())}</div><div class="${cls}">${esc(msg)}</div>`;
-  $('log').prepend(row);
-  while ($('log').children.length > 120) $('log').lastChild.remove();
+  log.prepend(row);
+  while (log.children.length > 120) log.lastChild.remove();
 }
 function clearLog () {
-  $('log').innerHTML = '';
+  const log = $('log');
+  if (log) log.innerHTML = '';
 }
 
 function selectedScript () {
@@ -1138,6 +1089,7 @@ function setPnlMetric (id, value) {
 }
 
 function renderPositionSummary (data = {}) {
+  if (!$('pos-open-count')) return;
   const s = data.summary || {};
   $('pos-open-count').textContent = s.openCount ?? 0;
   $('pos-closed-count').textContent = s.closedCount ?? 0;
@@ -1152,6 +1104,7 @@ function renderPositionSummary (data = {}) {
 }
 
 function renderExchangeOpen (rows = []) {
+  if (!$('positions-open-body')) return;
   $('positions-open-body').innerHTML = rows.length ? rows.map(p => `
     <tr>
       <td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td>
@@ -1162,6 +1115,7 @@ function renderExchangeOpen (rows = []) {
 }
 
 function renderExchangeClosed (rows = []) {
+  if (!$('positions-closed-body')) return;
   $('positions-closed-sub').textContent = `${rows.length} closed`;
   $('positions-closed-body').innerHTML = rows.length ? rows.map(t => `
     <tr>
@@ -1185,7 +1139,8 @@ async function loadPaperPositions (forced = false) {
     if (forced) addLog('success', 'Paper positions refreshed.');
   } catch (err) {
     updateChartState();
-    $('positions-updated-at').textContent = `Refresh failed: ${err.message}`;
+    const updatedAt = $('positions-updated-at');
+    if (updatedAt) updatedAt.textContent = `Refresh failed: ${err.message}`;
   } finally {
     if (forceBtn) forceBtn.disabled = false;
   }
