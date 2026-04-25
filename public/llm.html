@@ -85,7 +85,7 @@ button:disabled{opacity:.35;cursor:not-allowed}
           <div id="selected-status" class="status-card muted">Select a Gemini strategy to edit its own model, timeframe, capital, and paper-trading settings. Positions are tracked with paper trading in local MongoDB.</div>
           <div class="grid3" style="margin-top:10px">
             <div class="field"><label class="label" for="provider">LLM Provider</label><select class="inp" id="provider"><option value="google-gemini">Google Gemini</option></select></div>
-            <div class="field"><label class="label" for="model">Model Version</label><select class="inp" id="model"><option value="gemini-2.5-flash">gemini-2.5-flash</option><option value="gemini-2.5-pro">gemini-2.5-pro</option><option value="gemini-2.0-flash">gemini-2.0-flash</option></select></div>
+            <div class="field"><label class="label" for="model">Model Version</label><select class="inp" id="model"><option value="gemini-2.5-flash">gemini-2.5-flash</option><option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option><option value="gemini-2.5-pro">gemini-2.5-pro</option><option value="gemini-2.0-flash">gemini-2.0-flash</option></select></div>
             <div class="field"><label class="label" for="max-output-tokens">Max output tokens</label><input class="inp" id="max-output-tokens" type="number" min="128" step="64" value="700"></div>
           </div>
           <div class="grid2" style="margin-top:8px">
@@ -290,6 +290,7 @@ function fillModelOptions (selected, models = []) {
   const current = selected || select.value || 'gemini-2.5-flash';
   const defaults = [
     { code:'gemini-2.5-flash', displayName:'gemini-2.5-flash' },
+    { code:'gemini-2.5-flash-lite', displayName:'gemini-2.5-flash-lite' },
     { code:'gemini-2.5-pro', displayName:'gemini-2.5-pro' },
     { code:'gemini-2.0-flash', displayName:'gemini-2.0-flash' },
   ];
@@ -299,6 +300,7 @@ function fillModelOptions (selected, models = []) {
     map.set(code, row.displayName || code);
     return map;
   }, new Map());
+  if (current && !merged.has(current)) merged.set(current, current);
   select.innerHTML = [...merged.entries()].map(([code, label]) => `<option value="${esc(code)}">${esc(label)}</option>`).join('');
   select.value = merged.has(current) ? current : [...merged.keys()][0];
 }
