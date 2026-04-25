@@ -46,6 +46,16 @@ const leverageValue = payload => {
   const explicit = Number(payload?.leverage);
   return Number.isFinite(explicit) && explicit > 0 ? explicit : 1;
 };
+const llmSessionFields = strategy => {
+  if (!strategy || !('totalLlmCostUsd' in strategy)) return {};
+  return {
+    llmCostUsd: Number(strategy.totalLlmCostUsd || 0),
+    llmPromptTokens: Number(strategy.totalPromptTokens || 0),
+    llmOutputTokens: Number(strategy.totalOutputTokens || 0),
+    llmThoughtTokens: Number(strategy.totalThoughtTokens || 0),
+    llmCallCount: Number(strategy.totalLlmCalls || 0),
+  };
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  StrategyRunner — wraps one strategy instance with independent lifecycle
@@ -135,6 +145,7 @@ class StrategyRunner {
         grossLoss:         loses.reduce((a, t) => a + t.pnl, 0),
         currentDate:       s.currentDate,
         dailyStartCapital: s.dailyStartCap,
+        ...llmSessionFields(s),
       }).catch(e => console.error(`[${id}] Session update failed:`, e.message));
 
       await Position.deleteOne({ sessionId: this.sessionId }).catch(() => {});
@@ -165,6 +176,12 @@ class StrategyRunner {
       this.emit('warmed_up', {});
       this.emit('status', this._status());
     });
+
+    s.on('analysis_error', info => {
+      const message = info?.message || 'Analysis failed';
+      this.log('error', `LLM analysis failed: ${message}`);
+      this.emit('analysis_error', info);
+    });
   }
 
   // ── Start / resume ─────────────────────────────────────────────────────────
@@ -186,6 +203,7 @@ class StrategyRunner {
         riskPerTradePct:   strategyRiskPct(s),
         dailyStartCapital: s.capital,
         currentDate:       today(),
+        ...llmSessionFields(s),
       });
       this.sessionId = sess._id;
       this.log('info', `📋 New session created: ${sess._id}`);
@@ -212,6 +230,7 @@ class StrategyRunner {
         currentCapital:    this.strategy.capital,
         currentDate:       this.strategy.currentDate,
         dailyStartCapital: this.strategy.dailyStartCap,
+        ...llmSessionFields(this.strategy),
       }).catch(() => {});
     }
     this.emit('status', this._status());
@@ -251,19 +270,29 @@ class StrategyRunner {
   // ── Process one closed candle ──────────────────────────────────────────────
   async processCandle (candle) {
     if (!this.running || this.paused) return;
-    const state = this.strategy.processCandle(candle);
+    const state = await this.strategy.processCandle(candle);
     if (state) this.emit('stats', state);
+    if (this.sessionId) {
+      const llmCost = state?.llmCost || this.strategy.getFullState?.().llmCost || null;
+      await Session.findByIdAndUpdate(this.sessionId, {
+        currentCapital:    this.strategy.capital,
+        currentDate:       this.strategy.currentDate,
+        dailyStartCapital: this.strategy.dailyStartCap,
+        ...(llmCost ? {
+          llmCostUsd: Number(llmCost.totalUsd || 0),
+          llmPromptTokens: Number(llmCost.promptTokens || 0),
+          llmOutputTokens: Number(llmCost.outputTokens || 0),
+          llmThoughtTokens: Number(llmCost.thoughtsTokens || 0),
+          llmCallCount: Number(llmCost.totalCalls || 0),
+        } : {}),
+      }).catch(() => {});
+    }
 
     this.candlesSinceSave++;
     if (this.candlesSinceSave >= EQUITY_SNAP_EVERY && this.sessionId) {
       this.candlesSinceSave = 0;
       await Equity.create({ sessionId: this.sessionId, time: candle.openTime, equity: this.strategy.capital })
         .catch(() => {});
-      await Session.findByIdAndUpdate(this.sessionId, {
-        currentCapital:    this.strategy.capital,
-        currentDate:       this.strategy.currentDate,
-        dailyStartCapital: this.strategy.dailyStartCap,
-      }).catch(() => {});
       this.emit('equity_point', { time: Math.floor(candle.openTime / 1000), equity: this.strategy.capital });
     }
   }
@@ -284,10 +313,35 @@ class StrategyRunner {
     const dbTrades = await Trade.find({ sessionId: sess._id }).sort({ entryTime: 1 }).lean();
     s.trades = dbTrades.map(t => ({
       id: t.tradeNum, type: t.type, entry: t.entry, exit: t.exit,
-      qty: t.qty, pnl: t.pnl, pnlPct: t.pnlPct,
+      qty: t.qty, lotSize: t.lotSize, marginUsed: t.marginUsed, leverage: t.leverage,
+      pnl: t.pnl, pnlPct: t.pnlPct,
       entryTime: t.entryTime, exitTime: t.exitTime,
       reason: t.reason, sl: t.sl, tp: t.tp,
     }));
+
+    const openPos = await Position.findOne({ sessionId: sess._id }).lean();
+    if (openPos) {
+      s.position = {
+        type: openPos.type,
+        entry: openPos.entry,
+        sl: openPos.sl,
+        tp: openPos.tp,
+        trailSl: openPos.trailSl,
+        qty: openPos.qty,
+        lotSize: openPos.lotSize,
+        marginUsed: openPos.marginUsed,
+        leverage: openPos.leverage,
+        liquidationPrice: openPos.liquidationPrice ?? null,
+        entryFee: openPos.entryFee ?? 0,
+        entryTime: openPos.entryTime,
+        timeframe: openPos.timeframe || s.timeframe,
+        strategyKey: openPos.strategyKey || s.strategyKey,
+        decisionReason: openPos.decisionReason || '',
+        model: openPos.model || s.model,
+      };
+    } else {
+      s.position = null;
+    }
 
     const dbDailyPnl = await DailyPnl.find({ sessionId: sess._id }).lean();
     dbDailyPnl.forEach(d => {
@@ -299,9 +353,14 @@ class StrategyRunner {
     const todayPnl    = todayTrades.reduce((sum, t) => sum + t.pnl, 0);
     const todayStart  = sess.dailyStartCapital ?? (s.capital - todayPnl);
     s.setDailyContext(todayStr, todayStart);
+    if ('totalLlmCostUsd' in s) s.totalLlmCostUsd = Number(sess.llmCostUsd || 0);
+    if ('totalPromptTokens' in s) s.totalPromptTokens = Number(sess.llmPromptTokens || 0);
+    if ('totalOutputTokens' in s) s.totalOutputTokens = Number(sess.llmOutputTokens || 0);
+    if ('totalThoughtTokens' in s) s.totalThoughtTokens = Number(sess.llmThoughtTokens || 0);
+    if ('totalLlmCalls' in s) s.totalLlmCalls = Number(sess.llmCallCount || 0);
 
     this.wire();
-    this.log('info', `📂 Session restored (${this.id}): ${dbTrades.length} trades, capital $${s.capital.toFixed(2)}`);
+    this.log('info', `📂 Session restored (${this.id}): ${dbTrades.length} trades, capital $${s.capital.toFixed(2)}${openPos ? ', open position restored' : ''}`);
     return sess;
   }
 
@@ -338,6 +397,11 @@ class StrategyRunner {
       winCount:       sess.winCount,
       lossCount:      sess.lossCount,
       profitFactor:   sess.grossLoss !== 0 ? +(Math.abs(sess.grossProfit / sess.grossLoss)).toFixed(2) : null,
+      llmCostUsd:     Number(sess.llmCostUsd || 0),
+      llmPromptTokens:Number(sess.llmPromptTokens || 0),
+      llmOutputTokens:Number(sess.llmOutputTokens || 0),
+      llmThoughtTokens:Number(sess.llmThoughtTokens || 0),
+      llmCallCount:   Number(sess.llmCallCount || 0),
     };
   }
 

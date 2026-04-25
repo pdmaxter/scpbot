@@ -29,6 +29,11 @@ const sessionSchema = new mongoose.Schema({
   lossCount:          { type: Number,   default: 0       },
   grossProfit:        { type: Number,   default: 0       },
   grossLoss:          { type: Number,   default: 0       },
+  llmCostUsd:         { type: Number,   default: 0       },
+  llmPromptTokens:    { type: Number,   default: 0       },
+  llmOutputTokens:    { type: Number,   default: 0       },
+  llmThoughtTokens:   { type: Number,   default: 0       },
+  llmCallCount:       { type: Number,   default: 0       },
 }, { timestamps: true });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -94,6 +99,12 @@ const positionSchema = new mongoose.Schema({
   lotSize:    Number,
   marginUsed: Number,
   leverage:   Number,
+  liquidationPrice: Number,
+  entryFee:   Number,
+  timeframe:  String,
+  strategyKey: String,
+  decisionReason: String,
+  model:      String,
   entryTime:  Number,
 }, { timestamps: true });
 
@@ -131,6 +142,24 @@ const allInOneStrategySchema = new mongoose.Schema({
   slMultiplier: { type: Number, default: 2 },
   tpMultiplier: { type: Number, default: 4 },
   trailOffset: { type: Number, default: 1.5 },
+  isActive: { type: Boolean, default: false, index: true },
+}, { timestamps: true });
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  LLMStrategyConfig — persisted Gemini-backed strategy settings
+// ─────────────────────────────────────────────────────────────────────────────
+const llmStrategyConfigSchema = new mongoose.Schema({
+  key:      { type: String, required: true, unique: true, index: true },
+  name:     { type: String, required: true },
+  provider: { type: String, default: 'google-gemini' },
+  model:    { type: String, default: 'gemini-2.5-flash' },
+  apiKeyEnc:{ type: String, default: '' },
+  maxOutputTokens: { type: Number, default: 700 },
+  timeframe:{ type: String, default: '5m' },
+  capital:  { type: Number, default: 1000 },
+  leverage: { type: Number, default: 1 },
+  buyFeePct: { type: Number, default: 0 },
+  sellFeePct: { type: Number, default: 0 },
   isActive: { type: Boolean, default: false, index: true },
 }, { timestamps: true });
 
@@ -185,6 +214,7 @@ module.exports = {
   Position:  mongoose.model('BotPosition',  positionSchema),
   PineScriptConfig: mongoose.model('PineScriptConfig', pineScriptSchema),
   AllInOneStrategyConfig: mongoose.model('AllInOneStrategyConfig', allInOneStrategySchema),
+  LLMStrategyConfig: mongoose.model('LLMStrategyConfig', llmStrategyConfigSchema),
   UTBotConfig: mongoose.model('UTBotConfig', utBotConfigSchema),
   MT5ConnectionConfig: mongoose.model('MT5ConnectionConfig', mt5ConnectionConfigSchema),
 };

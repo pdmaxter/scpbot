@@ -12,13 +12,14 @@ const path       = require('path');
 const { execFile, spawn } = require('child_process');
 
 const db                                      = require('./db');
-const { Session, PineScriptConfig, AllInOneStrategyConfig, UTBotConfig, MT5ConnectionConfig, Trade, Position, DailyPnl, Equity } = db;
+const { Session, PineScriptConfig, AllInOneStrategyConfig, LLMStrategyConfig, UTBotConfig, MT5ConnectionConfig, Trade, Position, DailyPnl, Equity } = db;
 const { BotManager, StrategyRunner }         = require('./bot-manager');
 const { ScalpingStrategy }                   = require('./strategies/scalping');
 const { RangeBreakoutStrategy }              = require('./strategies/breakout');
 const { HeikenAshiSupertrendStrategy }       = require('./strategies/heikenashi_supertrend');
 const { PineScriptStrategy }                 = require('./strategies/pine_adapter');
 const { AllInOneStrategy, ALL_IN_ONE_DEFINITIONS, TIMEFRAME_MS } = require('./strategies/all_in_one');
+const { GeminiLlmStrategy, LLM_STRATEGY_DEFINITIONS, DEFAULT_MODEL, fetchGeminiModels } = require('./strategies/llm_gemini');
 const { UTBotStrategy }                      = require('./strategies/ut_bot');
 
 const SYMBOL_REST = 'BTCUSDT';
@@ -94,7 +95,7 @@ function mt5CipherKey () {
     .digest();
 }
 
-function encryptMt5Password (plain = '') {
+function encryptSecret (plain = '') {
   const value = String(plain || '');
   if (!value) return '';
   const iv = crypto.randomBytes(16);
@@ -103,7 +104,7 @@ function encryptMt5Password (plain = '') {
   return `${iv.toString('hex')}:${enc.toString('hex')}`;
 }
 
-function decryptMt5Password (packed = '') {
+function decryptSecret (packed = '') {
   const value = String(packed || '');
   if (!value || !value.includes(':')) return '';
   const [ivHex, encHex] = value.split(':');
@@ -111,6 +112,14 @@ function decryptMt5Password (packed = '') {
   const enc = Buffer.from(encHex, 'hex');
   const decipher = crypto.createDecipheriv('aes-256-cbc', mt5CipherKey(), iv);
   return Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
+}
+
+function encryptMt5Password (plain = '') {
+  return encryptSecret(plain);
+}
+
+function decryptMt5Password (packed = '') {
+  return decryptSecret(packed);
 }
 
 function maskAccountLogin (value = '') {
@@ -514,6 +523,7 @@ const breakoutRunner = new StrategyRunner('breakout',    new RangeBreakoutStrate
 const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertrendStrategy({ capital: 10000, riskPerTradePct: 2 }), io, { displayName: 'Heikin-Ashi SuperTrend', onPositionOpened: queueMt5PositionOpen, onTradeClosed: queueMt5TradeClose });
 const pineRunners    = new Map(); // scriptId -> StrategyRunner
 const allInOneRunners = new Map(); // strategyKey -> StrategyRunner
+const llmRunners = new Map(); // strategyKey -> StrategyRunner
 let utBotRunner = null;
 const STRATEGY_WATCHDOG_INTERVAL_MS = 30 * 1000;
 let strategyWatchdogTimer = null;
@@ -938,6 +948,183 @@ async function emitAllInOneState () {
   io.emit('all_status', manager.allStatus());
 }
 
+function llmRunnerId (key) {
+  return `llm:${key}`;
+}
+
+function llmDefaultConfig (def) {
+  return {
+    key: def.key,
+    name: def.name,
+    provider: 'google-gemini',
+    model: DEFAULT_MODEL,
+    apiKeyEnc: '',
+    maxOutputTokens: def.template === 'scalper' ? 512 : 1024,
+    timeframe: '5m',
+    capital: 1000,
+    leverage: 1,
+    buyFeePct: 0,
+    sellFeePct: 0,
+    isActive: false,
+  };
+}
+
+async function ensureLLMConfigs () {
+  await Promise.all(LLM_STRATEGY_DEFINITIONS.map(def => {
+    const insertDefaults = llmDefaultConfig(def);
+    delete insertDefaults.name;
+    return LLMStrategyConfig.updateOne(
+      { key: def.key },
+      { $setOnInsert: insertDefaults, $set: { name: def.name } },
+      { upsert: true }
+    );
+  }));
+}
+
+function llmListItem (doc) {
+  return {
+    key: doc.key,
+    name: doc.name,
+    provider: doc.provider || 'google-gemini',
+    model: doc.model || DEFAULT_MODEL,
+    hasApiKey: Boolean(doc.apiKeyEnc),
+    maxOutputTokens: Number(doc.maxOutputTokens || 700),
+    timeframe: doc.timeframe || '5m',
+    capital: doc.capital || 1000,
+    leverage: doc.leverage || 1,
+    buyFeePct: doc.buyFeePct || 0,
+    sellFeePct: doc.sellFeePct || 0,
+    isActive: Boolean(doc.isActive),
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function llmStrategyOptions (doc) {
+  return {
+    strategyKey: doc.key,
+    timeframe: TIMEFRAME_MS[doc.timeframe] ? doc.timeframe : '5m',
+    capital: doc.capital || 1000,
+    leverage: doc.leverage || 1,
+    buyFeePct: doc.buyFeePct || 0,
+    sellFeePct: doc.sellFeePct || 0,
+    provider: doc.provider || 'google-gemini',
+    model: doc.model || DEFAULT_MODEL,
+    apiKey: decryptSecret(doc.apiKeyEnc || ''),
+    maxOutputTokens: Number(doc.maxOutputTokens || 700),
+  };
+}
+
+function applyLLMRuntimeOptions (doc, body = {}) {
+  doc.provider = 'google-gemini';
+  if (body.model !== undefined) doc.model = String(body.model || DEFAULT_MODEL).trim().replace(/^models\//, '') || DEFAULT_MODEL;
+  if (body.timeframe !== undefined && TIMEFRAME_MS[String(body.timeframe)]) doc.timeframe = String(body.timeframe);
+  if (body.capital !== undefined) doc.capital = Math.max(100, Number(body.capital) || doc.capital || 1000);
+  if (body.leverage !== undefined) doc.leverage = Math.max(1, Number(body.leverage) || 1);
+  if (body.buyFeePct !== undefined) doc.buyFeePct = Math.max(0, Number(body.buyFeePct) || 0);
+  if (body.sellFeePct !== undefined) doc.sellFeePct = Math.max(0, Number(body.sellFeePct) || 0);
+  if (body.maxOutputTokens !== undefined) doc.maxOutputTokens = Math.max(128, Math.round(Number(body.maxOutputTokens) || 700));
+  if (body.apiKey !== undefined && String(body.apiKey || '').trim()) doc.apiKeyEnc = encryptSecret(String(body.apiKey || '').trim());
+}
+
+function llmAggregateStatus () {
+  const runners = [...llmRunners.values()];
+  const runningRunners = runners.filter(r => r.running);
+  return {
+    id: 'llm',
+    running: runningRunners.length > 0,
+    paused: runningRunners.length > 0 && runningRunners.every(r => r.paused),
+    warmedUp: runningRunners.length > 0 && runningRunners.every(r => r.strategy.warmedUp),
+    count: runners.length,
+    runningCount: runningRunners.length,
+  };
+}
+
+async function llmRunnerSnapshot (doc) {
+  const item = llmListItem(doc);
+  const runner = llmRunners.get(item.key);
+  const status = runner?._status() || { id: llmRunnerId(item.key), running: false, paused: false, warmedUp: false };
+  const session = runner ? await runner.buildSessionInfo().catch(() => null) : null;
+  return {
+    ...item,
+    runnerId: llmRunnerId(item.key),
+    status,
+    session,
+    stats: runner ? runner.strategy.getFullState() : null,
+  };
+}
+
+async function listLLMDetailed () {
+  await ensureLLMConfigs();
+  const docs = await LLMStrategyConfig.find().sort({ key: 1 }).lean();
+  const order = new Map(LLM_STRATEGY_DEFINITIONS.map((def, index) => [def.key, index]));
+  docs.sort((a, b) => (order.get(a.key) ?? 999) - (order.get(b.key) ?? 999));
+  return Promise.all(docs.map(llmRunnerSnapshot));
+}
+
+function commonLLMSettings (doc) {
+  return {
+    provider: 'google-gemini',
+    model: doc?.model || DEFAULT_MODEL,
+    hasApiKey: Boolean(doc?.apiKeyEnc),
+    maxOutputTokens: Number(doc?.maxOutputTokens || 700),
+    timeframe: doc?.timeframe || '5m',
+    capital: doc?.capital || 1000,
+    leverage: doc?.leverage || 1,
+    buyFeePct: doc?.buyFeePct || 0,
+    sellFeePct: doc?.sellFeePct || 0,
+  };
+}
+
+async function saveLLMStrategySettings (key, body = {}) {
+  await ensureLLMConfigs();
+  const doc = await LLMStrategyConfig.findOne({ key });
+  if (!doc) return null;
+  applyLLMRuntimeOptions(doc, body);
+  await doc.save();
+  const runner = llmRunners.get(key);
+  if (runner) {
+    const options = llmStrategyOptions(doc);
+    runner.strategy.provider = 'google-gemini';
+    runner.strategy.model = options.model;
+    runner.strategy.apiKey = options.apiKey;
+    runner.strategy.maxOutputTokens = options.maxOutputTokens;
+    runner.strategy.leverage = options.leverage;
+    runner.strategy.buyFeePct = options.buyFeePct / 100;
+    runner.strategy.sellFeePct = options.sellFeePct / 100;
+    if (!runner.running) runner.strategy.reset(options);
+  }
+  return doc;
+}
+
+async function saveCommonLLMSettings (body = {}) {
+  await ensureLLMConfigs();
+  const docs = await LLMStrategyConfig.find().sort({ key: 1 });
+  for (const doc of docs) {
+    applyLLMRuntimeOptions(doc, body);
+    await doc.save();
+  }
+  for (const runner of llmRunners.values()) {
+    const doc = docs.find(item => item.key === runner.strategy.strategyKey);
+    if (!doc) continue;
+    const options = llmStrategyOptions(doc);
+    runner.strategy.provider = 'google-gemini';
+    runner.strategy.model = options.model;
+    runner.strategy.apiKey = options.apiKey;
+    runner.strategy.maxOutputTokens = options.maxOutputTokens;
+    runner.strategy.leverage = options.leverage;
+    runner.strategy.buyFeePct = options.buyFeePct / 100;
+    runner.strategy.sellFeePct = options.sellFeePct / 100;
+    if (!runner.running) runner.strategy.reset(options);
+  }
+  return commonLLMSettings(docs[0]);
+}
+
+async function emitLLMState () {
+  io.emit('llm:status', llmAggregateStatus());
+  io.emit('llm:runners', await listLLMDetailed());
+  io.emit('all_status', manager.allStatus());
+}
+
 function utBotDefaultConfig () {
   return {
     key: 'utbot',
@@ -1067,6 +1254,20 @@ async function resetRunnerToConfiguredState (runner) {
     });
     return;
   }
+  if (runner.id.startsWith('llm:')) {
+    const key = String(runner.id).split(':')[1];
+    const doc = key ? await LLMStrategyConfig.findOne({ key }) : null;
+    await runner.reset(doc ? llmStrategyOptions(doc) : {
+      strategyKey: key,
+      timeframe: runner.strategy.timeframe || '5m',
+      capital: runner.strategy.initialCapital || 1000,
+      leverage: runner.strategy.leverage || 1,
+      model: runner.strategy.model || DEFAULT_MODEL,
+      apiKey: runner.strategy.apiKey || '',
+      maxOutputTokens: runner.strategy.maxOutputTokens || 700,
+    });
+    return;
+  }
   if (runner.id === 'utbot') {
     const doc = await ensureUTBotConfig();
     await runner.reset(utBotStrategyOptions(doc));
@@ -1163,11 +1364,57 @@ function ensureAllInOneRunner (doc) {
   return runner;
 }
 
+function hookLLMRunnerEvents (runner, key) {
+  if (runner._llmHooked) return;
+  runner._llmHooked = true;
+  const rawEmit = runner.emit.bind(runner);
+  runner.emit = (event, data) => {
+    rawEmit(event, data);
+    io.emit('llm:runner_event', {
+      key,
+      runnerId: runner.id,
+      event,
+      data,
+      status: runner._status(),
+      stats: runner.strategy.getFullState(),
+    });
+    if (['status', 'stats', 'session_info', 'position_opened', 'trade_closed', 'warmed_up', 'analysis_error'].includes(event)) {
+      emitLLMState().catch(e => console.error('[LLM] emit state failed:', e.message));
+    }
+  };
+}
+
+function ensureLLMRunner (doc) {
+  const key = doc.key;
+  let runner = llmRunners.get(key);
+  if (!runner) {
+    runner = new StrategyRunner(
+      llmRunnerId(key),
+      new GeminiLlmStrategy(llmStrategyOptions(doc)),
+      io,
+      {
+        sessionStrategyType: llmRunnerId(key),
+        displayName: doc.name,
+      }
+    );
+    llmRunners.set(key, runner);
+    manager.addRunner(runner);
+    hookLLMRunnerEvents(runner, key);
+    runner.wire();
+  } else {
+    runner.displayName = doc.name;
+    if (!runner.running) runner.strategy.reset(llmStrategyOptions(doc));
+    runner.wire();
+  }
+  return runner;
+}
+
 const STRATEGY_LABELS = {
   scalping: 'EMA Scalping',
   breakout: 'Range Breakout',
   heikenashi: 'Heikin-Ashi SuperTrend',
   pine: 'Pine Strategy',
+  llm: 'Gemini LLM Strategy',
   utbot: 'UT Bot Alerts',
 };
 
@@ -1185,6 +1432,10 @@ function strategyNameForSession (session, pineMap) {
   if (type.startsWith?.('allinone:')) {
     const key = type.slice('allinone:'.length);
     return ALL_IN_ONE_DEFINITIONS.find(def => def.key === key)?.name || type;
+  }
+  if (type.startsWith?.('llm:')) {
+    const key = type.slice('llm:'.length);
+    return LLM_STRATEGY_DEFINITIONS.find(def => def.key === key)?.name || type;
   }
   return STRATEGY_LABELS[type] || type;
 }
@@ -1729,6 +1980,7 @@ app.post('/api/positions/reset-all', async (_req, res) => {
     await Promise.all([
       emitPineState(),
       emitAllInOneState(),
+      emitLLMState(),
       emitUTBotState(),
       manager.sendSessionsList(io),
     ]);
@@ -2178,6 +2430,124 @@ app.post('/api/allinone/strategies/:key/reset', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/llm/strategies', async (_req, res) => {
+  try {
+    res.json(await listLLMDetailed());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/llm/settings', async (_req, res) => {
+  try {
+    await ensureLLMConfigs();
+    const doc = await LLMStrategyConfig.findOne().sort({ updatedAt: -1 }).lean();
+    res.json(commonLLMSettings(doc));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/llm/settings', async (req, res) => {
+  try {
+    const settings = await saveCommonLLMSettings(req.body || {});
+    await emitLLMState();
+    res.json({ ok: true, settings });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/llm/models', async (req, res) => {
+  try {
+    await ensureLLMConfigs();
+    const saved = await LLMStrategyConfig.findOne().sort({ updatedAt: -1 }).lean();
+    const apiKey = String(req.body?.apiKey || '').trim() || decryptSecret(saved?.apiKeyEnc || '');
+    if (!apiKey) return res.status(400).json({ error: 'Gemini API key is required to load models' });
+    const models = await fetchGeminiModels(apiKey);
+    res.json({ provider: 'google-gemini', models });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/llm/strategies/:key', async (req, res) => {
+  try {
+    await ensureLLMConfigs();
+    const doc = await LLMStrategyConfig.findOne({ key: req.params.key }).lean();
+    if (!doc) return res.status(404).json({ error: 'LLM strategy not found' });
+    res.json(await llmRunnerSnapshot(doc));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/llm/strategies/:key/settings', async (req, res) => {
+  try {
+    const doc = await saveLLMStrategySettings(req.params.key, req.body || {});
+    if (!doc) return res.status(404).json({ error: 'LLM strategy not found' });
+    const runner = ensureLLMRunner(doc);
+    if (!runner.running) await runner.reset(llmStrategyOptions(doc));
+    await emitLLMState();
+    res.json({ ok: true, strategy: await llmRunnerSnapshot(doc.toObject()) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/llm/strategies/:key/start', async (req, res) => {
+  try {
+    await ensureLLMConfigs();
+    const doc = req.body && Object.keys(req.body).length
+      ? await saveLLMStrategySettings(req.params.key, req.body || {})
+      : await LLMStrategyConfig.findOne({ key: req.params.key });
+    if (!doc) return res.status(404).json({ error: 'LLM strategy not found' });
+    if (!doc.apiKeyEnc) return res.status(400).json({ error: 'Gemini API key is not configured' });
+    doc.isActive = true;
+    await doc.save();
+    const runner = ensureLLMRunner(doc);
+    if (req.body && Object.keys(req.body).length) await runner.reset(llmStrategyOptions(doc));
+    await startRunner(runner, { createNew: false });
+    await emitLLMState();
+    res.json({ ok: true, key: doc.key, runnerId: runner.id, sessionId: runner.sessionId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/llm/strategies/:key/stop', async (req, res) => {
+  try {
+    const runner = llmRunners.get(req.params.key);
+    if (!runner) return res.status(404).json({ error: 'LLM runner not found' });
+    await runner.stop();
+    manager.maybeStopWs();
+    await emitLLMState();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/llm/strategies/:key/pause', async (req, res) => {
+  try {
+    const runner = llmRunners.get(req.params.key);
+    if (!runner) return res.status(404).json({ error: 'LLM runner not found' });
+    runner.pause();
+    await emitLLMState();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/llm/strategies/:key/resume', async (req, res) => {
+  try {
+    const runner = llmRunners.get(req.params.key);
+    if (!runner) return res.status(404).json({ error: 'LLM runner not found' });
+    runner.resume();
+    await emitLLMState();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/llm/strategies/:key/reset', async (req, res) => {
+  try {
+    await ensureLLMConfigs();
+    const doc = req.body && Object.keys(req.body).length
+      ? await saveLLMStrategySettings(req.params.key, req.body || {})
+      : await LLMStrategyConfig.findOne({ key: req.params.key });
+    if (!doc) return res.status(404).json({ error: 'LLM strategy not found' });
+    const runner = ensureLLMRunner(doc);
+    await runner.reset(llmStrategyOptions(doc));
+    manager.maybeStopWs();
+    await emitLLMState();
+    await manager.sendSessionsList(io);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/utbot/state', async (_req, res) => {
   try {
     const doc = await ensureUTBotConfig();
@@ -2264,11 +2634,13 @@ io.on('connection', async socket => {
   socket.emit('pine:scripts', await listPineScriptsDetailed());
   socket.emit('allinone:status', allInOneAggregateStatus());
   socket.emit('allinone:runners', await listAllInOneDetailed());
+  socket.emit('llm:status', llmAggregateStatus());
+  socket.emit('llm:runners', await listLLMDetailed());
   socket.emit('utbot:status', utBotAggregateStatus());
   socket.emit('utbot:state', await utBotSnapshot(await ensureUTBotConfig()));
   socket.emit('log', {
     level: 'info',
-    msg: `👋 Dashboard connected — EMA: ${scalpRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Breakout: ${breakoutRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | HA: ${haRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Pine bots: ${pineAggregateStatus().runningCount} running | All-in-One: ${allInOneAggregateStatus().runningCount} running | UT Bot: ${utBotAggregateStatus().running ? 'RUNNING' : 'STOPPED'}`,
+    msg: `👋 Dashboard connected — EMA: ${scalpRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Breakout: ${breakoutRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | HA: ${haRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Pine bots: ${pineAggregateStatus().runningCount} running | All-in-One: ${allInOneAggregateStatus().runningCount} running | LLM: ${llmAggregateStatus().runningCount} running | UT Bot: ${utBotAggregateStatus().running ? 'RUNNING' : 'STOPPED'}`,
     time: Date.now(),
   });
 });
@@ -2280,6 +2652,7 @@ async function bootstrap () {
   try { await db.connect(); }
   catch (e) { console.error('[FATAL] MongoDB:', e.message); process.exit(1); }
   await ensureAllInOneConfigs();
+  await ensureLLMConfigs();
   const utDoc = await ensureUTBotConfig();
   const restoredUTRunner = ensureUTBotRunner(utDoc);
   const savedUT = await restoredUTRunner.restoreFromDB();
@@ -2291,6 +2664,16 @@ async function bootstrap () {
   const allInOneDocs = await AllInOneStrategyConfig.find().lean().catch(() => []);
   for (const doc of allInOneDocs) {
     const runner = ensureAllInOneRunner(doc);
+    const saved = await runner.restoreFromDB();
+    if (saved && saved.isRunning) {
+      console.log(`[Boot] Auto-resuming ${runner.id} (${doc.name})...`);
+      await startRunner(runner, { createNew: false });
+    }
+  }
+
+  const llmDocs = await LLMStrategyConfig.find().lean().catch(() => []);
+  for (const doc of llmDocs) {
+    const runner = ensureLLMRunner(doc);
     const saved = await runner.restoreFromDB();
     if (saved && saved.isRunning) {
       console.log(`[Boot] Auto-resuming ${runner.id} (${doc.name})...`);

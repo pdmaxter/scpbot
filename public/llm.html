@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>All-in-One Strategy Bot</title>
+<title>Gemini LLM Strategies</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <style>
@@ -41,7 +41,7 @@ button:disabled{opacity:.35;cursor:not-allowed}
 .badge{display:inline-flex;align-items:center;border-radius:3px;padding:2px 6px;font-size:10px;font-weight:900}.badge.active{background:#00e67618;color:var(--green)}.badge.saved{background:#66708518;color:var(--muted)}.badge.long{background:#00e67618;color:var(--green)}.badge.short{background:#ff3d5718;color:var(--red)}.badge.open{background:#2979ff18;color:var(--blue)}.badge.closed{background:#66708518;color:var(--muted)}
 .status-card,.metric{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:10px}.metric-label{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em}.metric-value{font-size:18px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
 .chart-wrap{height:380px;position:relative;background:#f5f7fb}#price-chart{height:100%;width:100%}.chart-state{position:absolute;left:12px;top:12px;z-index:2;background:#f5f7fbd9;border:1px solid var(--line);border-radius:4px;padding:8px 10px;min-width:250px;pointer-events:none}.chart-state-title{font-size:10px;color:var(--muted);font-weight:900;letter-spacing:.08em;text-transform:uppercase}.chart-state-main{font-size:13px;font-weight:900;margin-top:3px;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chart-state-sub{display:flex;gap:8px;flex-wrap:wrap;margin-top:5px;font-size:11px;color:var(--muted)}
-.positions-metrics{display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:8px;margin-bottom:10px}.sync-strip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.positions-metrics{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:8px;margin-bottom:10px}.sync-strip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .table-wrap{overflow:auto;max-height:285px;border:1px solid var(--line);border-radius:4px;background:var(--panel2)}.wide-table{min-width:920px}table{width:100%;border-collapse:collapse;font-size:11px}th{position:sticky;top:0;background:#f3f5f9;color:var(--muted);font-size:10px;text-align:left;padding:7px;border-bottom:1px solid var(--line);white-space:nowrap}td{padding:7px;border-bottom:1px solid #e5e7eb;white-space:nowrap}tr:last-child td{border-bottom:0}
 .log{height:160px;overflow:auto;background:#ffffff;border:1px solid var(--line);border-radius:4px}.log-line{display:grid;grid-template-columns:72px 1fr;gap:8px;padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:11px}.log-time{color:var(--muted)}.empty{color:var(--muted);padding:14px;text-align:center}
 @media (max-width:1000px){.page{grid-template-rows:auto 1fr}.header{position:static;align-items:flex-start;padding:12px;flex-wrap:wrap}.main{grid-template-columns:1fr}.grid3{grid-template-columns:1fr 1fr}}
@@ -51,16 +51,16 @@ button:disabled{opacity:.35;cursor:not-allowed}
 <body>
 <div class="page">
   <header class="header">
-    <div class="brand"><span>ALL-IN-ONE</span> Strategy Bot</div>
+    <div class="brand"><span>GEMINI</span> LLM Strategies</div>
     <div class="price" id="price">--</div>
     <div class="spacer"></div>
     <div class="status-strip">
-      <span class="pill mode">10 STRATEGIES</span>
+      <span class="pill mode">2 LLM STRATEGIES</span>
       <span class="pill"><span class="dot" id="run-dot"></span><span id="run-label">STOPPED</span></span>
       <span class="pill">K <span id="ws-kline" class="neg">OFF</span></span>
       <span class="pill">T <span id="ws-ticker" class="neg">OFF</span></span>
       <a class="link-btn" href="/pnl.html">PNL</a>
-      <a class="link-btn" href="/llm.html">Gemini LLM</a>
+      <a class="link-btn" href="/allinone.html">All-in-One</a>
       <a class="link-btn" href="/pine.html">Pine Upload</a>
       <form method="POST" action="/logout" style="margin:0"><button class="ghost-btn" type="submit">Logout</button></form>
     </div>
@@ -69,7 +69,7 @@ button:disabled{opacity:.35;cursor:not-allowed}
     <div class="stack">
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">10 All-in-One Strategies</div>
+          <div class="panel-title">Gemini LLM Strategies</div>
           <button class="link-btn" type="button" onclick="loadStrategies()">Refresh</button>
         </div>
         <div class="panel-body">
@@ -78,12 +78,21 @@ button:disabled{opacity:.35;cursor:not-allowed}
       </section>
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">Common Strategy Settings</div>
+          <div class="panel-title">Selected Strategy Settings</div>
           <div class="muted" id="session-badge">No session</div>
         </div>
         <div class="panel-body">
-          <div id="selected-status" class="status-card muted">Timeframe and capital apply to all 10 strategies. Positions are tracked with paper trading in local MongoDB.</div>
+          <div id="selected-status" class="status-card muted">Select a Gemini strategy to edit its own model, timeframe, capital, and paper-trading settings. Positions are tracked with paper trading in local MongoDB.</div>
           <div class="grid3" style="margin-top:10px">
+            <div class="field"><label class="label" for="provider">LLM Provider</label><select class="inp" id="provider"><option value="google-gemini">Google Gemini</option></select></div>
+            <div class="field"><label class="label" for="model">Model Version</label><select class="inp" id="model"><option value="gemini-2.5-flash">gemini-2.5-flash</option><option value="gemini-2.5-pro">gemini-2.5-pro</option><option value="gemini-2.0-flash">gemini-2.0-flash</option></select></div>
+            <div class="field"><label class="label" for="max-output-tokens">Max output tokens</label><input class="inp" id="max-output-tokens" type="number" min="128" step="64" value="700"></div>
+          </div>
+          <div class="grid2" style="margin-top:8px">
+            <div class="field"><label class="label" for="api-key">Gemini API key</label><input class="inp" id="api-key" type="password" placeholder="Leave blank to keep saved key"></div>
+            <div class="field"><label class="label">Auth Status</label><div class="status-card muted" id="api-key-status">No Gemini API key saved.</div></div>
+          </div>
+          <div class="grid3" style="margin-top:8px">
             <div class="field"><label class="label" for="timeframe">Timeframe</label><select class="inp" id="timeframe"><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option></select></div>
             <div class="field"><label class="label" for="capital">Total capital</label><input class="inp" id="capital" type="number" min="100" step="100" value="1000"></div>
             <div class="field"><label class="label" for="leverage">Leverage</label><input class="inp" id="leverage" type="number" min="1" step="1" value="1"></div>
@@ -94,9 +103,10 @@ button:disabled{opacity:.35;cursor:not-allowed}
           </div>
           <div class="grid2" style="margin-top:8px">
             <div class="field"><label class="label">Mode</label><div class="status-card muted">Paper trading only.</div></div>
-            <div class="field"><label class="label">Auto exits</label><div class="status-card muted">Strategies decide Target, SL, and trailing from their built-in ATR logic.</div></div>
+            <div class="field"><label class="label">LLM Execution</label><div class="status-card muted">Signals come from Google Gemini using the selected model version and saved API key.</div></div>
           </div>
           <div class="btn-row">
+            <button class="link-btn" type="button" onclick="loadModelVersions()">Load Models</button>
             <button class="ghost-btn" type="button" onclick="saveSettings()">Save Settings</button>
             <button class="solid-btn" id="btn-start" type="button" onclick="startSelected()">Start</button>
             <button class="danger-btn" id="btn-stop" type="button" onclick="stopSelected()">Stop</button>
@@ -112,9 +122,9 @@ button:disabled{opacity:.35;cursor:not-allowed}
         <div class="panel-head"><div class="panel-title">BTC Candles / Orders / Strategy State</div><div class="muted" id="chart-last">Waiting for candles</div></div>
         <div class="chart-wrap">
           <div id="chart-state" class="chart-state">
-            <div class="chart-state-title">Selected All-in-One</div>
+            <div class="chart-state-title">Selected Gemini Strategy</div>
             <div class="chart-state-main" id="chart-strategy">No strategy selected</div>
-            <div class="chart-state-sub"><span id="chart-run-state">Stopped</span><span id="chart-pos-state">Flat</span><span id="chart-pnl-state">P&L --</span></div>
+            <div class="chart-state-sub"><span id="chart-run-state">Stopped</span><span id="chart-pos-state">Flat</span><span id="chart-pnl-state">P&L --</span><span id="chart-llm-cost">LLM --</span></div>
           </div>
           <div id="price-chart"></div>
         </div>
@@ -129,13 +139,14 @@ button:disabled{opacity:.35;cursor:not-allowed}
             <div class="metric"><div class="metric-label">Open PNL</div><div class="metric-value" id="pos-open-pnl">$0.00</div></div>
             <div class="metric"><div class="metric-label">Closed PNL</div><div class="metric-value" id="pos-closed-pnl">$0.00</div></div>
             <div class="metric"><div class="metric-label">Net PNL</div><div class="metric-value" id="pos-net-pnl">$0.00</div></div>
+            <div class="metric"><div class="metric-label">LLM Cost</div><div class="metric-value" id="llm-total-cost">$0.0000</div></div>
           </div>
-          <div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Time</th><th>Session</th></tr></thead><tbody id="positions-open-body"><tr><td colspan="11" class="muted">No open positions.</td></tr></tbody></table></div>
+          <div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>SL</th><th>Trail SL</th><th>TP</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Time</th><th>Session</th></tr></thead><tbody id="positions-open-body"><tr><td colspan="14" class="muted">No open positions.</td></tr></tbody></table></div>
         </div>
       </section>
       <section class="panel">
         <div class="panel-head"><div class="panel-title">Closed Positions</div><div class="muted" id="positions-closed-sub">Realized PNL</div></div>
-        <div class="panel-body"><div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Reason</th><th>Exit Time</th><th>Session</th></tr></thead><tbody id="positions-closed-body"><tr><td colspan="12" class="muted">No closed positions.</td></tr></tbody></table></div></div>
+        <div class="panel-body"><div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>SL</th><th>TP</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Reason</th><th>Exit Time</th><th>Session</th></tr></thead><tbody id="positions-closed-body"><tr><td colspan="14" class="muted">No closed positions.</td></tr></tbody></table></div></div>
       </section>
       <section class="panel">
         <div class="panel-head"><div class="panel-title">Activity</div><button class="ghost-btn" type="button" onclick="clearLog()">Clear</button></div>
@@ -162,17 +173,42 @@ let positionLines = {};
 
 function esc (value) { return String(value ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m])); }
 function fmtUSD (n) { const v = Number(n || 0); return (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+function fmtCost (n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '--';
+  return '$' + v.toLocaleString('en-US', { minimumFractionDigits:v >= 1 ? 2 : 4, maximumFractionDigits:v >= 1 ? 2 : 6 });
+}
 function fmtPct (n) { const v = Number(n || 0); return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
 function fmtLots (n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return '--';
   return v.toLocaleString('en-US', { minimumFractionDigits:0, maximumFractionDigits:6 });
 }
+function fmtInt (n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.round(v).toLocaleString('en-US') : '--';
+}
 function fmtTime (v) { return v ? new Date(v).toLocaleString([], { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '--'; }
 async function api (path, opts = {}) { const res = await fetch(path, opts); const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || res.statusText); return data; }
 function selectedStrategy () { return strategies.find(s => s.key === selectedKey) || null; }
 function pnlCls (n) { return Number(n) > 0 ? 'pos' : (Number(n) < 0 ? 'neg' : ''); }
 function badge (txt, kind) { return `<span class="badge ${esc(kind || '')}">${esc(txt || '--')}</span>`; }
+function llmCostState (stats = {}) { return stats?.llmCost || {}; }
+function llmCostValue (stats = {}) { return Number(llmCostState(stats).totalUsd || 0); }
+function llmTotals () {
+  return (strategies || []).reduce((acc, row) => {
+    const llm = llmCostState(row.stats);
+    acc.totalUsd += Number(llm.totalUsd || 0);
+    acc.totalCalls += Number(llm.totalCalls || 0);
+    acc.promptTokens += Number(llm.promptTokens || 0);
+    acc.outputTokens += Number(llm.outputTokens || 0);
+    return acc;
+  }, { totalUsd:0, totalCalls:0, promptTokens:0, outputTokens:0 });
+}
+function renderLlmTotals () {
+  const totals = llmTotals();
+  if ($('llm-total-cost')) $('llm-total-cost').textContent = fmtCost(totals.totalUsd);
+}
 const TF_MS = { '5m':300000, '15m':900000, '30m':1800000, '1h':3600000, '4h':14400000 };
 function chartTimeframe () { return selectedStrategy()?.timeframe || $('timeframe')?.value || '5m'; }
 function validCandle (c) {
@@ -223,6 +259,10 @@ function upsertBaseCandle (c) {
 }
 function options () {
   return {
+    provider: $('provider').value,
+    model: $('model').value,
+    apiKey: $('api-key').value.trim(),
+    maxOutputTokens: Math.max(128, Number($('max-output-tokens').value) || 700),
     timeframe: $('timeframe').value,
     capital: Number($('capital').value) || 1000,
     leverage: Math.max(1, Number($('leverage').value) || 1),
@@ -231,12 +271,36 @@ function options () {
   };
 }
 function setOptions (s = {}) {
+  const typedApiKey = $('api-key')?.value || '';
+  $('provider').value = s.provider || 'google-gemini';
+  fillModelOptions(s.model || 'gemini-2.5-flash');
+  $('max-output-tokens').value = s.maxOutputTokens || 700;
+  $('api-key').value = typedApiKey;
+  $('api-key-status').textContent = s.hasApiKey ? 'Gemini API key saved securely.' : 'No Gemini API key saved.';
   $('timeframe').value = s.timeframe || '5m';
   $('capital').value = s.capital || 1000;
   $('leverage').value = s.leverage || 1;
   $('buy-fee-pct').value = s.buyFeePct || 0;
   $('sell-fee-pct').value = s.sellFeePct || 0;
   if (baseCandles.length) renderCandles(baseCandles, false);
+}
+function fillModelOptions (selected, models = []) {
+  const select = $('model');
+  if (!select) return;
+  const current = selected || select.value || 'gemini-2.5-flash';
+  const defaults = [
+    { code:'gemini-2.5-flash', displayName:'gemini-2.5-flash' },
+    { code:'gemini-2.5-pro', displayName:'gemini-2.5-pro' },
+    { code:'gemini-2.0-flash', displayName:'gemini-2.0-flash' },
+  ];
+  const merged = [...defaults, ...models].filter(Boolean).reduce((map, row) => {
+    const code = String(row.code || row.name || '').replace(/^models\//, '');
+    if (!code || map.has(code)) return map;
+    map.set(code, row.displayName || code);
+    return map;
+  }, new Map());
+  select.innerHTML = [...merged.entries()].map(([code, label]) => `<option value="${esc(code)}">${esc(label)}</option>`).join('');
+  select.value = merged.has(current) ? current : [...merged.keys()][0];
 }
 function addLog (level, msg) {
   const log = $('log');
@@ -268,12 +332,15 @@ function renderStrategies (rows = strategies) {
   if (strategies.length && !strategies.some(s => s.key === selectedKey)) selectedKey = strategies.find(s => s.status?.running)?.key || strategies[0].key;
   $('strategy-list').innerHTML = strategies.length ? strategies.map(s => {
     const bits = [
+      s.provider === 'google-gemini' ? 'Gemini' : s.provider,
+      s.model || 'No model',
       s.timeframe,
       'Paper',
       `Cap ${fmtUSD(s.capital)}`,
       `Lev ${Number(s.leverage || 1).toFixed(0)}x`,
       `Fees ${Number(s.buyFeePct || 0).toFixed(2)}%/${Number(s.sellFeePct || 0).toFixed(2)}%`,
-      'Auto Target/SL',
+      `LLM ${fmtCost(llmCostValue(s.stats))}`,
+      s.hasApiKey ? 'Key saved' : 'No key',
       s.updatedAt ? fmtTime(s.updatedAt) : null,
     ].filter(Boolean).join(' / ');
     const running = s.status?.running;
@@ -292,6 +359,7 @@ function renderStrategies (rows = strategies) {
     applyStats(selected.stats || {});
     applySessionInfo(selected.session);
   }
+  renderLlmTotals();
 }
 function selectStrategy (key) {
   selectedKey = key;
@@ -299,13 +367,19 @@ function selectStrategy (key) {
   updateChartState();
   loadPositions(false).catch(() => {});
 }
-async function loadStrategies () { renderStrategies(await api('/api/allinone/strategies')); }
-async function loadCommonSettings () {
-  const settings = await api('/api/allinone/settings');
-  setOptions(settings);
+async function loadStrategies () { renderStrategies(await api('/api/llm/strategies')); }
+async function persistSelectedSettings () {
+  if (!selectedKey) throw new Error('Select a strategy first.');
+  return api(`/api/llm/strategies/${selectedKey}/settings`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
 }
-async function persistCommonSettings () {
-  return api('/api/allinone/settings', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
+async function loadModelVersions () {
+  try {
+    const data = await api('/api/llm/models', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ apiKey: $('api-key').value.trim() }) });
+    fillModelOptions($('model').value, data.models || []);
+    addLog('success', `Loaded ${Number(data.models?.length || 0)} Gemini models.`);
+  } catch (err) {
+    addLog('error', `Load models failed: ${err.message}`);
+  }
 }
 function applySessionInfo (info) { $('session-badge').textContent = !info ? 'No session' : (!info.isRunning ? 'STOPPED' : info.paused ? 'PAUSED' : 'RUNNING'); }
 function updateStatus (status = {}) {
@@ -324,18 +398,17 @@ function applyStats (stats = {}) {
 }
 async function saveSettings () {
   try {
-    await persistCommonSettings();
+    await persistSelectedSettings();
     await loadStrategies();
-    addLog('success', 'Common All-in-One settings saved for all strategies.');
+    addLog('success', 'Selected Gemini LLM strategy settings saved.');
   } catch (err) { addLog('error', `Save failed: ${err.message}`); }
 }
 async function startSelected () {
   if (!selectedKey) return addLog('error', 'Select a strategy first.');
   try {
-    await persistCommonSettings();
-    await api(`/api/allinone/strategies/${selectedKey}/start`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
+    await api(`/api/llm/strategies/${selectedKey}/start`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
     await loadStrategies();
-    addLog('success', 'All-in-One strategy started.');
+    addLog('success', 'Gemini LLM strategy started.');
   } catch (err) { addLog('error', `Start failed: ${err.message}`); }
 }
 async function toggleStrategy (event, key) {
@@ -345,11 +418,10 @@ async function toggleStrategy (event, key) {
   selectedKey = key;
   try {
     if (row.status?.running) {
-      await api(`/api/allinone/strategies/${key}/stop`, { method:'POST' });
+      await api(`/api/llm/strategies/${key}/stop`, { method:'POST' });
       addLog('success', `${row.name} stopped.`);
     } else {
-      await persistCommonSettings();
-      await api(`/api/allinone/strategies/${key}/start`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
+      await api(`/api/llm/strategies/${key}/start`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
       addLog('success', `${row.name} started.`);
     }
     await loadStrategies();
@@ -359,22 +431,22 @@ async function toggleStrategy (event, key) {
 }
 async function stopSelected () {
   if (!selectedKey) return addLog('error', 'Select a strategy first.');
-  try { await api(`/api/allinone/strategies/${selectedKey}/stop`, { method:'POST' }); await loadStrategies(); addLog('success', 'Strategy stopped.'); }
+  try { await api(`/api/llm/strategies/${selectedKey}/stop`, { method:'POST' }); await loadStrategies(); addLog('success', 'Strategy stopped.'); }
   catch (err) { addLog('error', `Stop failed: ${err.message}`); }
 }
 async function pauseSelected () {
   if (!selectedKey) return addLog('error', 'Select a strategy first.');
-  try { await api(`/api/allinone/strategies/${selectedKey}/pause`, { method:'POST' }); await loadStrategies(); addLog('warn', 'Strategy paused.'); }
+  try { await api(`/api/llm/strategies/${selectedKey}/pause`, { method:'POST' }); await loadStrategies(); addLog('warn', 'Strategy paused.'); }
   catch (err) { addLog('error', `Pause failed: ${err.message}`); }
 }
 async function resumeSelected () {
   if (!selectedKey) return addLog('error', 'Select a strategy first.');
-  try { await api(`/api/allinone/strategies/${selectedKey}/resume`, { method:'POST' }); await loadStrategies(); addLog('success', 'Strategy resumed.'); }
+  try { await api(`/api/llm/strategies/${selectedKey}/resume`, { method:'POST' }); await loadStrategies(); addLog('success', 'Strategy resumed.'); }
   catch (err) { addLog('error', `Resume failed: ${err.message}`); }
 }
 async function resetSelected () {
-  if (!selectedKey || !confirm('Reset selected All-in-One strategy session?')) return;
-  try { await api(`/api/allinone/strategies/${selectedKey}/reset`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) }); await loadStrategies(); addLog('warn', 'Strategy reset.'); }
+  if (!selectedKey || !confirm('Reset selected Gemini LLM strategy session?')) return;
+  try { await api(`/api/llm/strategies/${selectedKey}/reset`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) }); await loadStrategies(); addLog('warn', 'Strategy reset.'); }
   catch (err) { addLog('error', `Reset failed: ${err.message}`); }
 }
 function initChart () {
@@ -414,24 +486,45 @@ function updateChartState () {
   const pnl = Number(latestStats.totalPnl || 0);
   $('chart-pnl-state').innerHTML = `P&L <span class="${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</span>`;
   renderChartPosition(pos);
-  $('selected-status').innerHTML = s ? `<b>${esc(s.name)}</b><br><span class="muted">${esc(s.timeframe)} / Paper / Capital ${fmtUSD(s.capital)} / Leverage ${Number(s.leverage || 1).toFixed(0)}x / Buy fee ${Number(s.buyFeePct || 0).toFixed(2)}% / Sell fee ${Number(s.sellFeePct || 0).toFixed(2)}%</span>` : 'Select a strategy.';
+  const stats = s?.stats || latestStats || {};
+  const llm = llmCostState(stats);
+  const lastDecision = stats.lastDecision?.signal ? `${String(stats.lastDecision.signal).toUpperCase()} ${stats.lastDecision.confidence || ''}`.trim() : 'No decision yet';
+  $('chart-llm-cost').textContent = `LLM ${fmtCost(llm.totalUsd)}`;
+  const llmBits = [
+    `LLM cost ${fmtCost(llm.totalUsd)}`,
+    llm.totalCalls ? `${fmtInt(llm.totalCalls)} calls` : null,
+    llm.promptTokens ? `Prompt ${fmtInt(llm.promptTokens)}` : null,
+    llm.outputTokens ? `Output ${fmtInt(llm.outputTokens)}` : null,
+  ].filter(Boolean).join(' / ');
+  $('selected-status').innerHTML = s
+    ? `<b>${esc(s.name)}</b><br><span class="muted">${esc(s.provider || 'google-gemini')} / ${esc(s.model || '--')} / ${esc(s.timeframe)} / Paper / Capital ${fmtUSD(s.capital)} / Leverage ${Number(s.leverage || 1).toFixed(0)}x / Buy fee ${Number(s.buyFeePct || 0).toFixed(2)}% / Sell fee ${Number(s.sellFeePct || 0).toFixed(2)}% / ${s.hasApiKey ? 'Key saved' : 'No key'} / ${esc(llmBits || 'LLM cost --')} / Last decision ${esc(lastDecision)}</span>`
+    : 'Select a strategy.';
 }
 function setPnlMetric (id, value) { const el = $(id); el.className = `metric-value ${pnlCls(value)}`; el.textContent = fmtUSD(value); }
 function renderPositions (data = {}) {
   if (!$('pos-open-count')) return;
-  const summary = data.summary || {};
+  const runnerIds = new Set((strategies || []).map(s => s.runnerId || `llm:${s.key}`));
+  const openRows = (data.open || []).filter(row => runnerIds.has(row.runnerId));
+  const closedRows = (data.closed || []).filter(row => runnerIds.has(row.runnerId));
+  const summary = {
+    openCount: openRows.length,
+    closedCount: closedRows.length,
+    openPnl: openRows.reduce((sum, row) => sum + (Number(row.pnl) || 0), 0),
+    closedPnl: closedRows.reduce((sum, row) => sum + (Number(row.pnl) || 0), 0),
+  };
+  summary.netPnl = summary.openPnl + summary.closedPnl;
   $('pos-open-count').textContent = summary.openCount ?? 0;
   $('pos-closed-count').textContent = summary.closedCount ?? 0;
   setPnlMetric('pos-open-pnl', summary.openPnl || 0);
   setPnlMetric('pos-closed-pnl', summary.closedPnl || 0);
   setPnlMetric('pos-net-pnl', summary.netPnl || 0);
-  const running = Number(data.botStatus?.runningCount || 0);
-  $('positions-bot-pill').textContent = running ? `BOTS ${running} LIVE` : 'BOTS STOPPED';
+  const running = (strategies || []).filter(row => row.status?.running).length;
+  $('positions-bot-pill').textContent = running ? `LLM ${running} LIVE` : 'LLM STOPPED';
   $('positions-updated-at').textContent = `Local data ${new Date().toLocaleTimeString()}`;
-  $('positions-open-body').innerHTML = (data.open || []).length ? data.open.map(p => `<tr><td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td><td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${fmtUSD(p.marginUsed)}</td><td>${fmtLots(p.lots || p.size || p.qty)}</td><td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td><td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="11" class="muted">No open positions.</td></tr>';
-  const closed = data.closed || [];
-  $('positions-closed-sub').textContent = `${closed.length} closed`;
-  $('positions-closed-body').innerHTML = closed.length ? closed.map(t => `<tr><td>${badge('closed','closed')}</td><td>${esc(t.strategyName || '--')}</td><td>${badge(t.type,t.type)}</td><td>${fmtUSD(t.entry)}</td><td>${fmtUSD(t.exit)}</td><td>${fmtUSD(t.marginUsed)}</td><td>${fmtLots(t.lots || t.size || t.qty)}</td><td class="${pnlCls(t.pnl)}">${fmtUSD(t.pnl)}</td><td class="${pnlCls(t.pnlPct)}">${fmtPct(t.pnlPct)}</td><td>${esc(t.reason || '--')}</td><td>${fmtTime(t.exitTime)}</td><td>${esc(t.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="12" class="muted">No closed positions.</td></tr>';
+  renderLlmTotals();
+  $('positions-open-body').innerHTML = openRows.length ? openRows.map(p => `<tr><td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td><td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${fmtUSD(p.sl)}</td><td>${fmtUSD(p.trailSl)}</td><td>${fmtUSD(p.tp)}</td><td>${fmtUSD(p.marginUsed)}</td><td>${fmtLots(p.lots || p.size || p.qty)}</td><td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td><td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="14" class="muted">No open positions.</td></tr>';
+  $('positions-closed-sub').textContent = `${closedRows.length} closed`;
+  $('positions-closed-body').innerHTML = closedRows.length ? closedRows.map(t => `<tr><td>${badge('closed','closed')}</td><td>${esc(t.strategyName || '--')}</td><td>${badge(t.type,t.type)}</td><td>${fmtUSD(t.entry)}</td><td>${fmtUSD(t.exit)}</td><td>${fmtUSD(t.sl)}</td><td>${fmtUSD(t.tp)}</td><td>${fmtUSD(t.marginUsed)}</td><td>${fmtLots(t.lots || t.size || t.qty)}</td><td class="${pnlCls(t.pnl)}">${fmtUSD(t.pnl)}</td><td class="${pnlCls(t.pnlPct)}">${fmtPct(t.pnlPct)}</td><td>${esc(t.reason || '--')}</td><td>${fmtTime(t.exitTime)}</td><td>${esc(t.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="14" class="muted">No closed positions.</td></tr>';
 }
 async function loadPositions (forced = false) {
   const data = await api(`/api/positions?limit=1000${forced ? '&force=1' : ''}`);
@@ -450,7 +543,6 @@ async function resetAllPaperData () {
 }
 async function loadInitial () {
   await loadStrategies().catch(err => addLog('error', `Strategies load failed: ${err.message}`));
-  await loadCommonSettings().catch(err => addLog('error', `Common settings load failed: ${err.message}`));
   const candles = await api('/api/candles').catch(() => []);
   if (Array.isArray(candles)) renderCandles(candles);
   await loadPositions(false).catch(err => addLog('error', `Positions load failed: ${err.message}`));
@@ -459,21 +551,23 @@ socket.on('ticker', t => { currentPrice = Number(t.price); $('price').textConten
 socket.on('candles', renderCandles);
 socket.on('candle_tick', upsertBaseCandle);
 socket.on('ws_status', s => { $('ws-kline').textContent = s.kline ? 'ON' : 'OFF'; $('ws-kline').className = s.kline ? 'pos' : 'neg'; $('ws-ticker').textContent = s.ticker ? 'ON' : 'OFF'; $('ws-ticker').className = s.ticker ? 'pos' : 'neg'; });
-socket.on('allinone:status', updateHeaderStatus);
-socket.on('allinone:runners', renderStrategies);
-socket.on('allinone:runner_event', payload => {
+socket.on('llm:status', updateHeaderStatus);
+socket.on('llm:runners', renderStrategies);
+socket.on('llm:runner_event', payload => {
   const row = strategies.find(s => s.key === payload.key);
   if (row) { row.status = payload.status || row.status; row.stats = payload.stats || row.stats; }
+  if (payload.event === 'position_opened' || payload.event === 'trade_closed') loadPositions(true).catch(() => {});
   if (payload.key === selectedKey) {
     if (payload.status) updateStatus(payload.status);
     if (payload.stats) applyStats(payload.stats);
     if (payload.event === 'session_info') applySessionInfo(payload.data);
     if (payload.event === 'position_opened') addLog('success', `${row?.name || payload.key} opened ${payload.data?.type || ''}.`);
-    if (payload.event === 'trade_closed') { addLog(payload.data?.pnl >= 0 ? 'success' : 'warn', `${row?.name || payload.key} closed ${fmtUSD(payload.data?.pnl)}.`); loadPositions(true).catch(() => {}); }
+    if (payload.event === 'trade_closed') addLog(payload.data?.pnl >= 0 ? 'success' : 'warn', `${row?.name || payload.key} closed ${fmtUSD(payload.data?.pnl)}.`);
+    if (payload.event === 'analysis_error') addLog('error', `${row?.name || payload.key} analysis failed: ${payload.data?.message || 'Unknown error'}`);
   }
   renderStrategies();
 });
-socket.on('log', l => { const id = String(l.strategyId || l.strategy || ''); if (!id || id.startsWith('allinone:')) addLog(l.level || 'info', l.msg || ''); });
+socket.on('log', l => { const id = String(l.strategyId || l.strategy || ''); if (!id || id.startsWith('llm:')) addLog(l.level || 'info', l.msg || ''); });
 socket.on('connect', () => addLog('success', 'Connected to server.'));
 socket.on('disconnect', () => addLog('error', 'Disconnected from server.'));
 window.addEventListener('load', () => {
@@ -482,7 +576,7 @@ window.addEventListener('load', () => {
   $('timeframe')?.addEventListener('change', () => { if (baseCandles.length) renderCandles(baseCandles, false); });
   loadInitial();
   setInterval(() => loadPositions(false).catch(() => {}), 30000);
-  addLog('info', 'All-in-One Strategy Bot page ready.');
+  addLog('info', 'Gemini LLM strategies page ready.');
 });
 </script>
 </body>
