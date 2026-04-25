@@ -191,7 +191,11 @@ class AllInOneStrategy extends EventEmitter {
     if (this.position) {
       const p = this.position;
       if ((p.type === 'long' && signal.short) || (p.type === 'short' && signal.long)) {
+        const nextType = p.type === 'long' ? 'short' : 'long';
         this._closePos(candle.close, candle.openTime, 'signal_flip');
+        this._openPos(nextType, candle.close, atr, candle.openTime);
+        this.equityHistory.push({ time: candle.openTime, equity: this.capital });
+        if (this.equityHistory.length > 5000) this.equityHistory.shift();
         return this._state();
       }
       if (p.type === 'long') {
