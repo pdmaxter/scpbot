@@ -1,0 +1,38 @@
+//@version=5
+strategy("Gemini BTC Heikin-Ashi Scalper", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
+
+// --- Strategy Inputs ---
+lookback = input.int(3, "Trend Confirmation Lookback", minval=1)
+useSmooth = input.bool(true, "Use Smoothed Logic (Filters Noise)")
+
+// --- Heikin-Ashi Calculations ---
+// We pull the HA values explicitly so we can trade on the real chart
+haTicker = ticker.heikinashi(syminfo.tickerid)
+haOpen  = request.security(haTicker, timeframe.period, open)
+haClose = request.security(haTicker, timeframe.period, close)
+haHigh  = request.security(haTicker, timeframe.period, high)
+haLow   = request.security(haTicker, timeframe.period, low)
+
+// --- Trend Logic ---
+// Green HA: Close > Open and usually no lower wick
+// Red HA: Open > Close and usually no upper wick
+isBullish = haClose > haOpen and haLow >= math.min(haOpen, haClose)
+isBearish = haClose < haOpen and haHigh <= math.max(haOpen, haClose)
+
+// Confirmation: Ensure the trend has persisted for 'n' candles
+bullishSignal = ta.highest(isBullish ? 1 : 0, lookback) == 1 and isBullish
+bearishSignal = ta.highest(isBearish ? 1 : 0, lookback) == 1 and isBearish
+
+// --- Entry & Exit Conditions ---
+if (bullishSignal)
+    strategy.entry("Long", strategy.long, comment="HA Buy")
+
+if (bearishSignal)
+    strategy.entry("Short", strategy.short, comment="HA Sell")
+
+// --- Visuals ---
+plotshape(bullishSignal and not bullishSignal[1], "Buy Label", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(bearishSignal and not bearishSignal[1], "Sell Label", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// Optional: Background coloring for trend state
+bgcolor(isBullish ? color.new(color.green, 90) : isBearish ? color.new(color.red, 90) : na)

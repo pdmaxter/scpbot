@@ -12,7 +12,7 @@ const path       = require('path');
 const { execFile, spawn } = require('child_process');
 
 const db                                      = require('./db');
-const { Session, PineScriptConfig, AllInOneStrategyConfig, LLMStrategyConfig, UTBotConfig, MT5ConnectionConfig, Trade, Position, DailyPnl, Equity } = db;
+const { Session, PineScriptConfig, AllInOneStrategyConfig, LLMStrategyConfig, GeminiBTCConfig, UTBotConfig, MT5ConnectionConfig, Trade, Position, DailyPnl, Equity } = db;
 const { BotManager, StrategyRunner }         = require('./bot-manager');
 const { ScalpingStrategy }                   = require('./strategies/scalping');
 const { RangeBreakoutStrategy }              = require('./strategies/breakout');
@@ -20,6 +20,7 @@ const { HeikenAshiSupertrendStrategy }       = require('./strategies/heikenashi_
 const { PineScriptStrategy }                 = require('./strategies/pine_adapter');
 const { AllInOneStrategy, ALL_IN_ONE_DEFINITIONS, TIMEFRAME_MS } = require('./strategies/all_in_one');
 const { GeminiLlmStrategy, LLM_STRATEGY_DEFINITIONS, DEFAULT_MODEL, fetchGeminiModels } = require('./strategies/llm_gemini');
+const { GeminiBtcStrategy, GEMINI_BTC_DEFAULTS } = require('./strategies/gemini_btc');
 const { UTBotStrategy }                      = require('./strategies/ut_bot');
 
 const SYMBOL_REST = 'BTCUSDT';
@@ -524,6 +525,7 @@ const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertren
 const pineRunners    = new Map(); // scriptId -> StrategyRunner
 const allInOneRunners = new Map(); // strategyKey -> StrategyRunner
 const llmRunners = new Map(); // strategyKey -> StrategyRunner
+let geminiBtcRunner = null;
 let utBotRunner = null;
 const STRATEGY_WATCHDOG_INTERVAL_MS = 30 * 1000;
 let strategyWatchdogTimer = null;
@@ -1125,6 +1127,85 @@ async function emitLLMState () {
   io.emit('all_status', manager.allStatus());
 }
 
+function geminiBtcDefaultConfig () {
+  return { ...GEMINI_BTC_DEFAULTS };
+}
+
+async function ensureGeminiBtcConfig () {
+  const defaults = geminiBtcDefaultConfig();
+  delete defaults.name;
+  await GeminiBTCConfig.updateOne(
+    { key: 'geminibtc' },
+    { $setOnInsert: defaults, $set: { name: 'Gemini BTC Heikin-Ashi Scalper' } },
+    { upsert: true }
+  );
+  return GeminiBTCConfig.findOne({ key: 'geminibtc' });
+}
+
+function applyGeminiBtcRuntimeOptions (doc, body = {}) {
+  if (body.timeframe !== undefined && TIMEFRAME_MS[String(body.timeframe)]) doc.timeframe = String(body.timeframe);
+  if (body.capital !== undefined) doc.capital = Math.max(100, Number(body.capital) || doc.capital || 1000);
+  if (body.leverage !== undefined) doc.leverage = Math.max(1, Number(body.leverage) || 1);
+  if (body.lookback !== undefined) doc.lookback = Math.max(1, Math.round(Number(body.lookback) || 3));
+  if (body.buyFeePct !== undefined) doc.buyFeePct = Math.max(0, Number(body.buyFeePct) || 0);
+  if (body.sellFeePct !== undefined) doc.sellFeePct = Math.max(0, Number(body.sellFeePct) || 0);
+}
+
+function geminiBtcStrategyOptions (doc) {
+  return {
+    timeframe: doc.timeframe || '5m',
+    capital: doc.capital || 1000,
+    leverage: doc.leverage || 1,
+    lookback: doc.lookback || 3,
+    buyFeePct: doc.buyFeePct || 0,
+    sellFeePct: doc.sellFeePct || 0,
+  };
+}
+
+function geminiBtcConfigView (doc) {
+  return {
+    key: 'geminibtc',
+    name: doc.name || 'Gemini BTC Heikin-Ashi Scalper',
+    timeframe: doc.timeframe || '5m',
+    capital: doc.capital || 1000,
+    leverage: doc.leverage || 1,
+    lookback: doc.lookback || 3,
+    buyFeePct: doc.buyFeePct || 0,
+    sellFeePct: doc.sellFeePct || 0,
+    isActive: Boolean(doc.isActive),
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function geminiBtcAggregateStatus () {
+  const running = Boolean(geminiBtcRunner?.running);
+  return {
+    id: 'geminibtc',
+    running,
+    paused: Boolean(geminiBtcRunner?.paused),
+    warmedUp: Boolean(geminiBtcRunner?.strategy?.warmedUp),
+    runningCount: running ? 1 : 0,
+  };
+}
+
+async function geminiBtcSnapshot (doc) {
+  const runner = geminiBtcRunner;
+  return {
+    ...geminiBtcConfigView(doc),
+    runnerId: 'geminibtc',
+    status: runner?._status() || { id: 'geminibtc', running: false, paused: false, warmedUp: false },
+    session: runner ? await runner.buildSessionInfo().catch(() => null) : null,
+    stats: runner ? runner.strategy.getFullState() : null,
+  };
+}
+
+async function emitGeminiBtcState () {
+  const doc = await ensureGeminiBtcConfig();
+  io.emit('geminibtc:status', geminiBtcAggregateStatus());
+  io.emit('geminibtc:state', await geminiBtcSnapshot(doc));
+  io.emit('all_status', manager.allStatus());
+}
+
 function utBotDefaultConfig () {
   return {
     key: 'utbot',
@@ -1268,10 +1349,56 @@ async function resetRunnerToConfiguredState (runner) {
     });
     return;
   }
+  if (runner.id === 'geminibtc') {
+    const doc = await ensureGeminiBtcConfig();
+    await runner.reset(geminiBtcStrategyOptions(doc));
+    return;
+  }
   if (runner.id === 'utbot') {
     const doc = await ensureUTBotConfig();
     await runner.reset(utBotStrategyOptions(doc));
   }
+}
+
+function hookGeminiBtcRunnerEvents (runner) {
+  if (runner._geminiBtcHooked) return;
+  runner._geminiBtcHooked = true;
+  const rawEmit = runner.emit.bind(runner);
+  runner.emit = (event, data) => {
+    rawEmit(event, data);
+    io.emit('geminibtc:runner_event', {
+      runnerId: runner.id,
+      event,
+      data,
+      status: runner._status(),
+      stats: runner.strategy.getFullState(),
+    });
+    if (['status', 'stats', 'session_info', 'position_opened', 'trade_closed', 'warmed_up'].includes(event)) {
+      emitGeminiBtcState().catch(e => console.error('[GEMINIBTC] emit state failed:', e.message));
+    }
+  };
+}
+
+function ensureGeminiBtcRunner (doc) {
+  if (!geminiBtcRunner) {
+    geminiBtcRunner = new StrategyRunner(
+      'geminibtc',
+      new GeminiBtcStrategy(geminiBtcStrategyOptions(doc)),
+      io,
+      {
+        sessionStrategyType: 'geminibtc',
+        displayName: 'Gemini BTC Heikin-Ashi Scalper',
+      }
+    );
+    manager.addRunner(geminiBtcRunner);
+    hookGeminiBtcRunnerEvents(geminiBtcRunner);
+    geminiBtcRunner.wire();
+  } else {
+    geminiBtcRunner.displayName = 'Gemini BTC Heikin-Ashi Scalper';
+    if (!geminiBtcRunner.running) geminiBtcRunner.strategy.reset(geminiBtcStrategyOptions(doc));
+    geminiBtcRunner.wire();
+  }
+  return geminiBtcRunner;
 }
 
 function hookUTBotRunnerEvents (runner) {
@@ -1415,6 +1542,7 @@ const STRATEGY_LABELS = {
   heikenashi: 'Heikin-Ashi SuperTrend',
   pine: 'Pine Strategy',
   llm: 'Gemini LLM Strategy',
+  geminibtc: 'Gemini BTC Heikin-Ashi Scalper',
   utbot: 'UT Bot Alerts',
 };
 
@@ -1981,6 +2109,7 @@ app.post('/api/positions/reset-all', async (_req, res) => {
       emitPineState(),
       emitAllInOneState(),
       emitLLMState(),
+      emitGeminiBtcState(),
       emitUTBotState(),
       manager.sendSessionsList(io),
     ]);
@@ -2548,6 +2677,82 @@ app.post('/api/llm/strategies/:key/reset', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/geminibtc/state', async (_req, res) => {
+  try {
+    const doc = await ensureGeminiBtcConfig();
+    ensureGeminiBtcRunner(doc);
+    res.json(await geminiBtcSnapshot(doc));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/geminibtc/settings', async (req, res) => {
+  try {
+    const doc = await ensureGeminiBtcConfig();
+    applyGeminiBtcRuntimeOptions(doc, req.body || {});
+    await doc.save();
+    const runner = ensureGeminiBtcRunner(doc);
+    if (!runner.running) await runner.reset(geminiBtcStrategyOptions(doc));
+    await emitGeminiBtcState();
+    res.json({ ok: true, state: await geminiBtcSnapshot(doc) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/geminibtc/start', async (req, res) => {
+  try {
+    const doc = await ensureGeminiBtcConfig();
+    applyGeminiBtcRuntimeOptions(doc, req.body || {});
+    doc.isActive = true;
+    await doc.save();
+    const runner = ensureGeminiBtcRunner(doc);
+    if (req.body && Object.keys(req.body).length) await runner.reset(geminiBtcStrategyOptions(doc));
+    await startRunner(runner, { createNew: false });
+    await emitGeminiBtcState();
+    res.json({ ok: true, runnerId: runner.id, sessionId: runner.sessionId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/geminibtc/stop', async (_req, res) => {
+  try {
+    if (!geminiBtcRunner) return res.status(404).json({ error: 'Gemini BTC runner not found' });
+    await geminiBtcRunner.stop();
+    manager.maybeStopWs();
+    await emitGeminiBtcState();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/geminibtc/pause', async (_req, res) => {
+  try {
+    if (!geminiBtcRunner) return res.status(404).json({ error: 'Gemini BTC runner not found' });
+    geminiBtcRunner.pause();
+    await emitGeminiBtcState();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/geminibtc/resume', async (_req, res) => {
+  try {
+    if (!geminiBtcRunner) return res.status(404).json({ error: 'Gemini BTC runner not found' });
+    geminiBtcRunner.resume();
+    await emitGeminiBtcState();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/geminibtc/reset', async (req, res) => {
+  try {
+    const doc = await ensureGeminiBtcConfig();
+    applyGeminiBtcRuntimeOptions(doc, req.body || {});
+    await doc.save();
+    const runner = ensureGeminiBtcRunner(doc);
+    await runner.reset(geminiBtcStrategyOptions(doc));
+    manager.maybeStopWs();
+    await emitGeminiBtcState();
+    await manager.sendSessionsList(io);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/utbot/state', async (_req, res) => {
   try {
     const doc = await ensureUTBotConfig();
@@ -2636,11 +2841,13 @@ io.on('connection', async socket => {
   socket.emit('allinone:runners', await listAllInOneDetailed());
   socket.emit('llm:status', llmAggregateStatus());
   socket.emit('llm:runners', await listLLMDetailed());
+  socket.emit('geminibtc:status', geminiBtcAggregateStatus());
+  socket.emit('geminibtc:state', await geminiBtcSnapshot(await ensureGeminiBtcConfig()));
   socket.emit('utbot:status', utBotAggregateStatus());
   socket.emit('utbot:state', await utBotSnapshot(await ensureUTBotConfig()));
   socket.emit('log', {
     level: 'info',
-    msg: `👋 Dashboard connected — EMA: ${scalpRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Breakout: ${breakoutRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | HA: ${haRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Pine bots: ${pineAggregateStatus().runningCount} running | All-in-One: ${allInOneAggregateStatus().runningCount} running | LLM: ${llmAggregateStatus().runningCount} running | UT Bot: ${utBotAggregateStatus().running ? 'RUNNING' : 'STOPPED'}`,
+    msg: `👋 Dashboard connected — EMA: ${scalpRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Breakout: ${breakoutRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | HA: ${haRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Pine bots: ${pineAggregateStatus().runningCount} running | All-in-One: ${allInOneAggregateStatus().runningCount} running | LLM: ${llmAggregateStatus().runningCount} running | Gemini BTC: ${geminiBtcAggregateStatus().running ? 'RUNNING' : 'STOPPED'} | UT Bot: ${utBotAggregateStatus().running ? 'RUNNING' : 'STOPPED'}`,
     time: Date.now(),
   });
 });
@@ -2653,6 +2860,13 @@ async function bootstrap () {
   catch (e) { console.error('[FATAL] MongoDB:', e.message); process.exit(1); }
   await ensureAllInOneConfigs();
   await ensureLLMConfigs();
+  const geminiBtcDoc = await ensureGeminiBtcConfig();
+  const restoredGeminiBtcRunner = ensureGeminiBtcRunner(geminiBtcDoc);
+  const savedGeminiBtc = await restoredGeminiBtcRunner.restoreFromDB();
+  if (savedGeminiBtc && savedGeminiBtc.isRunning) {
+    console.log('[Boot] Auto-resuming geminibtc (Gemini BTC Heikin-Ashi Scalper)...');
+    await startRunner(restoredGeminiBtcRunner, { createNew: false });
+  }
   const utDoc = await ensureUTBotConfig();
   const restoredUTRunner = ensureUTBotRunner(utDoc);
   const savedUT = await restoredUTRunner.restoreFromDB();

@@ -164,6 +164,21 @@ const llmStrategyConfigSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  GeminiBTCConfig — settings for Gemini BTC Heikin-Ashi strategy page
+// ─────────────────────────────────────────────────────────────────────────────
+const geminiBtcConfigSchema = new mongoose.Schema({
+  key:      { type: String, default: 'geminibtc', unique: true, index: true },
+  name:     { type: String, default: 'Gemini BTC Heikin-Ashi Scalper' },
+  timeframe:{ type: String, default: '5m' },
+  capital:  { type: Number, default: 1000 },
+  leverage: { type: Number, default: 1 },
+  lookback: { type: Number, default: 3 },
+  buyFeePct: { type: Number, default: 0 },
+  sellFeePct: { type: Number, default: 0 },
+  isActive: { type: Boolean, default: false, index: true },
+}, { timestamps: true });
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  UTBotConfig — settings for the dedicated UT Bot Alerts strategy page
 // ─────────────────────────────────────────────────────────────────────────────
 const utBotConfigSchema = new mongoose.Schema({
@@ -215,6 +230,7 @@ module.exports = {
   PineScriptConfig: mongoose.model('PineScriptConfig', pineScriptSchema),
   AllInOneStrategyConfig: mongoose.model('AllInOneStrategyConfig', allInOneStrategySchema),
   LLMStrategyConfig: mongoose.model('LLMStrategyConfig', llmStrategyConfigSchema),
+  GeminiBTCConfig: mongoose.model('GeminiBTCConfig', geminiBtcConfigSchema),
   UTBotConfig: mongoose.model('UTBotConfig', utBotConfigSchema),
   MT5ConnectionConfig: mongoose.model('MT5ConnectionConfig', mt5ConnectionConfigSchema),
 };
