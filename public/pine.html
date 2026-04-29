@@ -179,6 +179,8 @@ tr:last-child td{border-bottom:0}
           <div class="btn-row">
             <button class="solid-btn" type="button" onclick="activateSelected()">Activate Selected</button>
             <button class="link-btn" type="button" onclick="newBot()">Run Selected</button>
+            <button class="solid-btn" type="button" onclick="startAllPineBots()">Start All</button>
+            <button class="danger-btn" type="button" onclick="stopAllPineBots()">Stop All</button>
             <button class="ghost-btn" type="button" onclick="editSelected()">Edit</button>
             <button class="danger-btn" type="button" onclick="deleteSelected()">Delete Selected</button>
           </div>
@@ -962,6 +964,19 @@ async function startBot () {
     addLog('error', `Start failed: ${err.message}`);
   }
 }
+async function startAllPineBots () {
+  try {
+    const targets = pineScripts.filter(s => !s.status?.running);
+    for (const script of targets) {
+      await api(`/api/pine/scripts/${script.id}/start`, { method:'POST' });
+    }
+    await loadScripts();
+    await loadSelectedRuntime();
+    addLog('success', targets.length ? `Started ${targets.length} Pine bots.` : 'All Pine bots are already running.');
+  } catch (err) {
+    addLog('error', `Start all failed: ${err.message}`);
+  }
+}
 async function stopBot () {
   if (!selectedPineScriptId) return addLog('error', 'Select a Pine script first.');
   try {
@@ -970,6 +985,19 @@ async function stopBot () {
     addLog('success', 'Pine bot stopped.');
   } catch (err) {
     addLog('error', `Stop failed: ${err.message}`);
+  }
+}
+async function stopAllPineBots () {
+  try {
+    const targets = pineScripts.filter(s => s.status?.running);
+    for (const script of targets) {
+      await api(`/api/pine/scripts/${script.id}/stop`, { method:'POST' });
+    }
+    await loadScripts();
+    await loadSelectedRuntime();
+    addLog('warn', targets.length ? `Stopped ${targets.length} Pine bots.` : 'No Pine bots are running.');
+  } catch (err) {
+    addLog('error', `Stop all failed: ${err.message}`);
   }
 }
 async function pauseBot () {

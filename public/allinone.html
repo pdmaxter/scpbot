@@ -105,6 +105,8 @@ button:disabled{opacity:.35;cursor:not-allowed}
             <button class="ghost-btn" type="button" onclick="saveSettings()">Save Settings</button>
             <button class="solid-btn" id="btn-start" type="button" onclick="startSelected()">Start</button>
             <button class="danger-btn" id="btn-stop" type="button" onclick="stopSelected()">Stop</button>
+            <button class="solid-btn" type="button" onclick="startAllStrategies()">Start All</button>
+            <button class="danger-btn" type="button" onclick="stopAllStrategies()">Stop All</button>
             <button class="ghost-btn" id="btn-pause" type="button" onclick="pauseSelected()">Pause</button>
             <button class="ghost-btn" id="btn-resume" type="button" onclick="resumeSelected()">Resume</button>
             <button class="ghost-btn" type="button" onclick="resetSelected()">Reset</button>
@@ -343,6 +345,17 @@ async function startSelected () {
     addLog('success', 'All-in-One strategy started.');
   } catch (err) { addLog('error', `Start failed: ${err.message}`); }
 }
+async function startAllStrategies () {
+  try {
+    await persistCommonSettings();
+    const targets = strategies.filter(s => !s.status?.running);
+    for (const row of targets) {
+      await api(`/api/allinone/strategies/${row.key}/start`, { method:'POST' });
+    }
+    await loadStrategies();
+    addLog('success', targets.length ? `Started ${targets.length} All-in-One strategies.` : 'All All-in-One strategies are already running.');
+  } catch (err) { addLog('error', `Start all failed: ${err.message}`); }
+}
 async function toggleStrategy (event, key) {
   event.stopPropagation();
   const row = strategies.find(s => s.key === key);
@@ -366,6 +379,16 @@ async function stopSelected () {
   if (!selectedKey) return addLog('error', 'Select a strategy first.');
   try { await api(`/api/allinone/strategies/${selectedKey}/stop`, { method:'POST' }); await loadStrategies(); addLog('success', 'Strategy stopped.'); }
   catch (err) { addLog('error', `Stop failed: ${err.message}`); }
+}
+async function stopAllStrategies () {
+  try {
+    const targets = strategies.filter(s => s.status?.running);
+    for (const row of targets) {
+      await api(`/api/allinone/strategies/${row.key}/stop`, { method:'POST' });
+    }
+    await loadStrategies();
+    addLog('warn', targets.length ? `Stopped ${targets.length} All-in-One strategies.` : 'No All-in-One strategies are running.');
+  } catch (err) { addLog('error', `Stop all failed: ${err.message}`); }
 }
 async function pauseSelected () {
   if (!selectedKey) return addLog('error', 'Select a strategy first.');

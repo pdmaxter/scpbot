@@ -197,11 +197,30 @@ async function doStartSelected () {
   addLog('success', 'Strategy started.');
 }
 
+async function doStartAllStrategies () {
+  await doSaveSettings();
+  const targets = strategies.filter(s => !s.status?.running);
+  for (const row of targets) {
+    await api(`/api/markets/${PAGE.page}/strategies/${row.key}/start`, { method:'POST' });
+  }
+  await loadStrategies();
+  addLog('success', targets.length ? `Started ${targets.length} ${PAGE.label} strategies.` : `All ${PAGE.label} strategies are already running.`);
+}
+
 async function doStopSelected () {
   if (!selectedKey) return;
   await api(`/api/markets/${PAGE.page}/strategies/${selectedKey}/stop`, { method:'POST' });
   await loadStrategies();
   addLog('warn', 'Strategy stopped.');
+}
+
+async function doStopAllStrategies () {
+  const targets = strategies.filter(s => s.status?.running);
+  for (const row of targets) {
+    await api(`/api/markets/${PAGE.page}/strategies/${row.key}/stop`, { method:'POST' });
+  }
+  await loadStrategies();
+  addLog('warn', targets.length ? `Stopped ${targets.length} ${PAGE.label} strategies.` : `No ${PAGE.label} strategies are running.`);
 }
 
 async function doPauseSelected () {
@@ -415,6 +434,8 @@ window.toggleStrategy = toggleStrategy;
 window.saveSettings = async () => { try { await doSaveSettings(); await loadStrategies(); addLog('success', 'Settings saved.'); } catch (e) { addLog('error', e.message); } };
 window.startSelected = async () => { try { await doStartSelected(); } catch (e) { addLog('error', e.message); } };
 window.stopSelected = async () => { try { await doStopSelected(); } catch (e) { addLog('error', e.message); } };
+window.startAllStrategies = async () => { try { await doStartAllStrategies(); } catch (e) { addLog('error', e.message); } };
+window.stopAllStrategies = async () => { try { await doStopAllStrategies(); } catch (e) { addLog('error', e.message); } };
 window.pauseSelected = async () => { try { await doPauseSelected(); } catch (e) { addLog('error', e.message); } };
 window.resumeSelected = async () => { try { await doResumeSelected(); } catch (e) { addLog('error', e.message); } };
 window.resetSelected = async () => { try { await doResetSelected(); } catch (e) { addLog('error', e.message); } };
