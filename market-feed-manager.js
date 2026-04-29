@@ -153,9 +153,29 @@ async function fetchBinanceSnapshot (symbol) {
 }
 
 async function fetchYahooSnapshot (symbol, range) {
-  const json = await getJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=5m&range=${encodeURIComponent(range || '5d')}&includePrePost=false&events=div%2Csplits`);
+  const candidates = yahooSymbolCandidates(symbol);
+  const hosts = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
+  const errors = [];
+  for (const candidate of candidates) {
+    for (const host of hosts) {
+      try {
+        const url = `https://${host}/v8/finance/chart/${encodeURIComponent(candidate)}?interval=5m&range=${encodeURIComponent(range || '5d')}&includePrePost=false&events=div%2Csplits`;
+        const json = await getJson(url);
+        const snapshot = extractYahooSnapshot(candidate, json);
+        if (snapshot) return snapshot;
+        const remoteError = json?.chart?.error?.description || json?.chart?.error?.code || 'No Yahoo Finance chart result';
+        errors.push(`${candidate}@${host}: ${remoteError}`);
+      } catch (error) {
+        errors.push(`${candidate}@${host}: ${error.message}`);
+      }
+    }
+  }
+  throw new Error(errors[errors.length - 1] || 'No Yahoo Finance chart result');
+}
+
+function extractYahooSnapshot (symbol, json) {
   const result = json?.chart?.result?.[0];
-  if (!result) throw new Error('No Yahoo Finance chart result');
+  if (!result) return null;
   const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
   const quote = result.indicators?.quote?.[0] || {};
   const now = Date.now();
@@ -171,6 +191,7 @@ async function fetchYahooSnapshot (symbol, range) {
   const closes = candles.map(c => c.close).filter(Number.isFinite);
   const latest = closes[closes.length - 1] ?? Number(result.meta?.regularMarketPrice);
   const prevClose = Number(result.meta?.chartPreviousClose || result.meta?.previousClose);
+  if (!candles.length && !Number.isFinite(latest)) return null;
   return {
     candles: dedupeCandles(candles),
     ticker: Number.isFinite(latest)
@@ -184,6 +205,15 @@ async function fetchYahooSnapshot (symbol, range) {
         }
       : null,
   };
+}
+
+function yahooSymbolCandidates (symbol = '') {
+  const raw = String(symbol || '').trim() || 'EURUSD=X';
+  const aliases = {
+    'XAUUSD=X': ['XAUUSD=X', 'GC=F'],
+    'GC=F': ['GC=F', 'XAUUSD=X'],
+  };
+  return aliases[raw] || [raw];
 }
 
 function validCandle (candle) {

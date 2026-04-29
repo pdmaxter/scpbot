@@ -186,39 +186,39 @@ async function loadStrategies () {
   renderStrategies(await api(`/api/markets/${PAGE.page}/strategies`));
 }
 
-async function saveSettings () {
+async function doSaveSettings () {
   await api(`/api/markets/${PAGE.page}/settings`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
 }
 
-async function startSelected () {
+async function doStartSelected () {
   if (!selectedKey) return;
   await api(`/api/markets/${PAGE.page}/strategies/${selectedKey}/start`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
   await loadStrategies();
   addLog('success', 'Strategy started.');
 }
 
-async function stopSelected () {
+async function doStopSelected () {
   if (!selectedKey) return;
   await api(`/api/markets/${PAGE.page}/strategies/${selectedKey}/stop`, { method:'POST' });
   await loadStrategies();
   addLog('warn', 'Strategy stopped.');
 }
 
-async function pauseSelected () {
+async function doPauseSelected () {
   if (!selectedKey) return;
   await api(`/api/markets/${PAGE.page}/strategies/${selectedKey}/pause`, { method:'POST' });
   await loadStrategies();
   addLog('warn', 'Strategy paused.');
 }
 
-async function resumeSelected () {
+async function doResumeSelected () {
   if (!selectedKey) return;
   await api(`/api/markets/${PAGE.page}/strategies/${selectedKey}/resume`, { method:'POST' });
   await loadStrategies();
   addLog('success', 'Strategy resumed.');
 }
 
-async function resetSelected () {
+async function doResetSelected () {
   if (!selectedKey) return;
   await api(`/api/markets/${PAGE.page}/strategies/${selectedKey}/reset`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options()) });
   await loadStrategies();
@@ -412,12 +412,12 @@ async function boot () {
 
 window.selectStrategy = selectStrategy;
 window.toggleStrategy = toggleStrategy;
-window.saveSettings = async () => { try { await saveSettings(); await loadStrategies(); addLog('success', 'Settings saved.'); } catch (e) { addLog('error', e.message); } };
-window.startSelected = async () => { try { await startSelected(); } catch (e) { addLog('error', e.message); } };
-window.stopSelected = async () => { try { await stopSelected(); } catch (e) { addLog('error', e.message); } };
-window.pauseSelected = async () => { try { await pauseSelected(); } catch (e) { addLog('error', e.message); } };
-window.resumeSelected = async () => { try { await resumeSelected(); } catch (e) { addLog('error', e.message); } };
-window.resetSelected = async () => { try { await resetSelected(); } catch (e) { addLog('error', e.message); } };
+window.saveSettings = async () => { try { await doSaveSettings(); await loadStrategies(); addLog('success', 'Settings saved.'); } catch (e) { addLog('error', e.message); } };
+window.startSelected = async () => { try { await doStartSelected(); } catch (e) { addLog('error', e.message); } };
+window.stopSelected = async () => { try { await doStopSelected(); } catch (e) { addLog('error', e.message); } };
+window.pauseSelected = async () => { try { await doPauseSelected(); } catch (e) { addLog('error', e.message); } };
+window.resumeSelected = async () => { try { await doResumeSelected(); } catch (e) { addLog('error', e.message); } };
+window.resetSelected = async () => { try { await doResetSelected(); } catch (e) { addLog('error', e.message); } };
 window.forceClose = runnerId => forceClosePosition(runnerId).catch(e => addLog('error', e.message));
 window.loadPositions = flash => loadPagePositions(flash).catch(e => addLog('error', e.message));
 window.resetAllPaperData = () => resetPagePaperData().catch(e => addLog('error', e.message));
