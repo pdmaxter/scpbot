@@ -12,8 +12,9 @@ const path       = require('path');
 const { execFile, spawn } = require('child_process');
 
 const db                                      = require('./db');
-const { Session, PineScriptConfig, AllInOneStrategyConfig, LLMStrategyConfig, GeminiBTCConfig, UTBotConfig, MT5ConnectionConfig, Trade, Position, DailyPnl, Equity } = db;
+const { Session, PineScriptConfig, AllInOneStrategyConfig, LLMStrategyConfig, GeminiBTCConfig, UTBotConfig, MarketSuiteStrategyConfig, MT5ConnectionConfig, Trade, Position, DailyPnl, Equity } = db;
 const { BotManager, StrategyRunner }         = require('./bot-manager');
+const { MarketFeedManager }                  = require('./market-feed-manager');
 const { ScalpingStrategy }                   = require('./strategies/scalping');
 const { RangeBreakoutStrategy }              = require('./strategies/breakout');
 const { HeikenAshiSupertrendStrategy }       = require('./strategies/heikenashi_supertrend');
@@ -22,6 +23,7 @@ const { AllInOneStrategy, ALL_IN_ONE_DEFINITIONS, TIMEFRAME_MS } = require('./st
 const { GeminiLlmStrategy, LLM_STRATEGY_DEFINITIONS, DEFAULT_MODEL, fetchGeminiModels } = require('./strategies/llm_gemini');
 const { GeminiBtcStrategy, GEMINI_BTC_DEFAULTS } = require('./strategies/gemini_btc');
 const { UTBotStrategy }                      = require('./strategies/ut_bot');
+const { MarketSuiteStrategy, MARKET_SUITE_DEFINITIONS, defaultSymbolForMarket } = require('./strategies/market_suite');
 
 const SYMBOL_REST = 'BTCUSDT';
 const INTERVAL_REST = '5m';
@@ -33,6 +35,45 @@ const ALL_IN_ONE_AUTO_RISK = {
   tpMultiplier: 4,
   trailOffset: 1.5,
 };
+const MARKET_PAGE_CONFIGS = {
+  btc: {
+    page: 'btc',
+    title: 'BTC Strategy Bot',
+    namespace: 'btcpage',
+    label: 'BTC',
+    provider: 'binance',
+    symbol: 'BTCUSDT',
+    route: '/btc.html',
+  },
+  gold: {
+    page: 'gold',
+    title: 'Gold Strategy Bot',
+    namespace: 'goldpage',
+    label: 'Gold',
+    provider: 'yahoo',
+    symbol: 'XAUUSD=X',
+    route: '/gold.html',
+  },
+  forex: {
+    page: 'forex',
+    title: 'Currency Pair Strategy Bot',
+    namespace: 'forexpage',
+    label: 'FX',
+    provider: 'yahoo',
+    symbol: 'EURUSD=X',
+    route: '/forex.html',
+    symbols: [
+      'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 'USDCAD=X', 'AUDUSD=X', 'NZDUSD=X',
+      'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 'EURCAD=X', 'EURNZD=X',
+      'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X',
+      'AUDJPY=X', 'AUDCAD=X', 'AUDCHF=X', 'AUDNZD=X',
+      'CADJPY=X', 'CHFJPY=X',
+      'NZDJPY=X', 'NZDCAD=X', 'NZDCHF=X',
+      'USDSGD=X', 'USDHKD=X', 'USDSEK=X', 'USDNOK=X', 'USDZAR=X', 'USDMXN=X', 'USDTRY=X', 'USDCNH=X', 'USDINR=X',
+    ],
+  },
+};
+const MARKET_PAGE_ORDER = ['btc', 'gold', 'forex'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Auth config  (set via .env)
@@ -423,17 +464,17 @@ const LOGIN_HTML = `<!DOCTYPE html>
 <title>BTC Bot — Sign In</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-body{background:#f5f7fb;color:#182230;font-family:'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;}
-.box{background:#ffffff;border:1px solid #d9e0ea;border-radius:10px;padding:40px 36px;width:340px;}
+body{background:#0b1220;color:#e5edf7;font-family:'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;font-size:13px;}
+.box{background:#111827;border:1px solid #253045;border-radius:10px;padding:40px 36px;width:340px;}
 .logo{font-size:22px;font-weight:800;text-align:center;margin-bottom:28px;letter-spacing:-.01em;}
 .logo span{color:#ff9100;}
-label{display:block;font-size:11px;color:#667085;margin-bottom:4px;margin-top:14px;text-transform:uppercase;letter-spacing:.07em;}
-input{width:100%;background:#f7f9fc;border:1px solid #d9e0ea;color:#182230;padding:9px 12px;border-radius:5px;font-size:13px;outline:none;transition:.15s;}
+label{display:block;font-size:11px;color:#93a4bb;margin-bottom:4px;margin-top:14px;text-transform:uppercase;letter-spacing:.07em;}
+input{width:100%;background:#0f172a;border:1px solid #253045;color:#e5edf7;padding:9px 12px;border-radius:5px;font-size:13px;outline:none;transition:.15s;}
 input:focus{border-color:#2979ff;}
 .btn{margin-top:22px;width:100%;padding:10px;background:#2979ff;color:#fff;border:none;border-radius:5px;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.03em;transition:.15s;}
 .btn:hover{background:#1565c0;}
 .error{margin-top:14px;padding:8px 12px;background:#ff3d5718;border:1px solid #ff3d5730;border-radius:4px;color:#ff3d57;font-size:12px;text-align:center;}
-.note{margin-top:16px;font-size:10px;color:#667085;text-align:center;}
+.note{margin-top:16px;font-size:10px;color:#93a4bb;text-align:center;}
 </style>
 </head>
 <body>
@@ -525,6 +566,22 @@ const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertren
 const pineRunners    = new Map(); // scriptId -> StrategyRunner
 const allInOneRunners = new Map(); // strategyKey -> StrategyRunner
 const llmRunners = new Map(); // strategyKey -> StrategyRunner
+const marketSuiteRunners = {
+  btc: new Map(),
+  gold: new Map(),
+  forex: new Map(),
+};
+const marketFeedManagers = Object.fromEntries(
+  MARKET_PAGE_ORDER.map(page => {
+    const cfg = MARKET_PAGE_CONFIGS[page];
+    return [page, new MarketFeedManager(io, {
+      namespace: cfg.namespace,
+      label: cfg.label,
+      provider: cfg.provider,
+      symbol: cfg.symbol,
+    })];
+  })
+);
 let geminiBtcRunner = null;
 let utBotRunner = null;
 const STRATEGY_WATCHDOG_INTERVAL_MS = 30 * 1000;
@@ -590,7 +647,13 @@ async function fetchKlinesRange (fromMs, toMs) {
 }
 
 function summarizeBacktest (strategy, candles, fromMs, toMs) {
-  for (const candle of candles) strategy.processCandle(candle);
+  if (!strategy) throw new Error('Strategy is required');
+  if (!Array.isArray(candles)) throw new Error('Candles must be an array');
+  for (const candle of candles) {
+    if (!candle) continue;
+    try { strategy.processCandle(candle); }
+    catch (e) { console.error('[Backtest] processCandle failed:', e.message); }
+  }
   if (strategy.position && candles.length) {
     const last = candles[candles.length - 1];
     strategy._closePos(last.close, last.openTime, 'range_end');
@@ -625,13 +688,16 @@ function summarizeBacktest (strategy, candles, fromMs, toMs) {
 }
 
 function calcMaxDrawdown (equityHistory) {
+  if (!Array.isArray(equityHistory) || equityHistory.length === 0) return 0;
   let peak = -Infinity;
   let maxDd = 0;
   for (const p of equityHistory) {
-    if (p.equity > peak) peak = p.equity;
-    if (peak > 0) maxDd = Math.max(maxDd, (peak - p.equity) / peak * 100);
+    if (p && Number.isFinite(p.equity)) {
+      if (p.equity > peak) peak = p.equity;
+      if (peak > 0 && Number.isFinite(peak)) maxDd = Math.max(maxDd, (peak - p.equity) / peak * 100);
+    }
   }
-  return maxDd;
+  return Number.isFinite(maxDd) ? maxDd : 0;
 }
 
 function pineListItem (doc) {
@@ -1127,6 +1193,237 @@ async function emitLLMState () {
   io.emit('all_status', manager.allStatus());
 }
 
+function marketPageConfig (page) {
+  return MARKET_PAGE_CONFIGS[page] || MARKET_PAGE_CONFIGS.btc;
+}
+
+function marketRunnerId (page, key) {
+  return `market:${page}:${key}`;
+}
+
+function marketSuiteDefaultConfig (page, def) {
+  return {
+    page,
+    symbol: defaultSymbolForMarket(page),
+    key: def.key,
+    name: def.name,
+    timeframe: '5m',
+    capital: 1000,
+    leverage: 1,
+    buyFeePct: 0,
+    sellFeePct: 0,
+    isActive: false,
+  };
+}
+
+async function ensureMarketSuiteConfigs (page) {
+  const cfg = marketPageConfig(page);
+  await Promise.all(MARKET_SUITE_DEFINITIONS.map(def => {
+    const defaults = marketSuiteDefaultConfig(page, def);
+    delete defaults.name;
+    return MarketSuiteStrategyConfig.updateOne(
+      { page, key: def.key },
+      { $setOnInsert: defaults, $set: { name: def.name } },
+      { upsert: true }
+    );
+  }));
+}
+
+function marketSuiteListItem (doc) {
+  return {
+    page: doc.page,
+    symbol: doc.symbol || defaultSymbolForMarket(doc.page),
+    key: doc.key,
+    name: doc.name,
+    timeframe: doc.timeframe || '5m',
+    capital: doc.capital || 1000,
+    leverage: doc.leverage || 1,
+    buyFeePct: doc.buyFeePct || 0,
+    sellFeePct: doc.sellFeePct || 0,
+    isActive: Boolean(doc.isActive),
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function marketSuiteStrategyOptions (doc) {
+  const cfg = marketPageConfig(doc.page);
+  return {
+    marketPage: doc.page,
+    marketLabel: cfg.label,
+    symbol: doc.symbol || defaultSymbolForMarket(doc.page),
+    strategyKey: doc.key,
+    timeframe: TIMEFRAME_MS[doc.timeframe] ? doc.timeframe : '5m',
+    capital: doc.capital || 1000,
+    leverage: doc.leverage || 1,
+    buyFeePct: doc.buyFeePct || 0,
+    sellFeePct: doc.sellFeePct || 0,
+  };
+}
+
+function applyMarketSuiteRuntimeOptions (doc, body = {}) {
+  if (body.symbol !== undefined) {
+    const value = String(body.symbol || '').trim();
+    if (value) doc.symbol = value;
+  }
+  if (body.timeframe !== undefined && TIMEFRAME_MS[String(body.timeframe)]) doc.timeframe = String(body.timeframe);
+  if (body.capital !== undefined) doc.capital = Math.max(100, Number(body.capital) || doc.capital || 1000);
+  if (body.leverage !== undefined) doc.leverage = Math.max(1, Number(body.leverage) || 1);
+  if (body.buyFeePct !== undefined) doc.buyFeePct = Math.max(0, Number(body.buyFeePct) || 0);
+  if (body.sellFeePct !== undefined) doc.sellFeePct = Math.max(0, Number(body.sellFeePct) || 0);
+}
+
+async function listMarketSuiteDetailed (page) {
+  await ensureMarketSuiteConfigs(page);
+  const docs = await MarketSuiteStrategyConfig.find({ page }).sort({ createdAt: 1 }).lean();
+  const order = new Map(MARKET_SUITE_DEFINITIONS.map((def, index) => [def.key, index]));
+  docs.sort((a, b) => (order.get(a.key) ?? 999) - (order.get(b.key) ?? 999));
+  return Promise.all(docs.map(doc => marketSuiteRunnerSnapshot(doc)));
+}
+
+function marketCommonSettingsView (page, doc) {
+  const cfg = marketPageConfig(page);
+  return {
+    page,
+    symbol: doc?.symbol || cfg.symbol,
+    symbolOptions: cfg.symbols || [cfg.symbol],
+    timeframe: doc?.timeframe || '5m',
+    capital: doc?.capital || 1000,
+    leverage: doc?.leverage || 1,
+    buyFeePct: doc?.buyFeePct || 0,
+    sellFeePct: doc?.sellFeePct || 0,
+  };
+}
+
+async function saveCommonMarketSuiteSettings (page, body = {}) {
+  await ensureMarketSuiteConfigs(page);
+  const cfg = marketPageConfig(page);
+  const symbol = String(body.symbol || cfg.symbol).trim() || cfg.symbol;
+  const patch = {
+    symbol,
+    timeframe: TIMEFRAME_MS[String(body.timeframe)] ? String(body.timeframe) : '5m',
+    capital: Math.max(100, Number(body.capital) || 1000),
+    leverage: Math.max(1, Number(body.leverage) || 1),
+    buyFeePct: Math.max(0, Number(body.buyFeePct) || 0),
+    sellFeePct: Math.max(0, Number(body.sellFeePct) || 0),
+  };
+  await MarketSuiteStrategyConfig.updateMany({ page }, { $set: patch });
+  const feed = marketFeedManagers[page];
+  if (feed) feed.setSymbol(symbol);
+  for (const runner of marketSuiteRunners[page].values()) {
+    runner.strategy.symbol = symbol;
+    runner.strategy.leverage = patch.leverage;
+    runner.strategy.buyFeePct = patch.buyFeePct / 100;
+    runner.strategy.sellFeePct = patch.sellFeePct / 100;
+    if (!runner.running) runner.strategy.reset({
+      ...marketSuiteStrategyOptions({
+        ...patch,
+        page,
+        key: runner.strategy.strategyKey,
+      }),
+    });
+  }
+  return patch;
+}
+
+function marketAggregateStatus (page) {
+  const runners = [...marketSuiteRunners[page].values()];
+  const runningRunners = runners.filter(r => r.running);
+  return {
+    id: page,
+    running: runningRunners.length > 0,
+    paused: runningRunners.length > 0 && runningRunners.every(r => r.paused),
+    warmedUp: runningRunners.length > 0 && runningRunners.every(r => r.strategy.warmedUp),
+    count: runners.length,
+    runningCount: runningRunners.length,
+    symbol: marketFeedManagers[page]?.symbol || marketPageConfig(page).symbol,
+  };
+}
+
+async function marketSuiteRunnerSnapshot (doc) {
+  const item = marketSuiteListItem(doc);
+  const runner = marketSuiteRunners[doc.page]?.get(doc.key);
+  const status = runner?._status() || { id: marketRunnerId(doc.page, doc.key), running: false, paused: false, warmedUp: false };
+  const session = runner ? await runner.buildSessionInfo().catch(() => null) : null;
+  return {
+    ...item,
+    runnerId: marketRunnerId(doc.page, doc.key),
+    status,
+    session,
+    stats: runner ? runner.strategy.getFullState() : null,
+  };
+}
+
+async function emitMarketSuiteState (page) {
+  const cfg = marketPageConfig(page);
+  io.emit(`${cfg.namespace}:status`, marketAggregateStatus(page));
+  io.emit(`${cfg.namespace}:runners`, await listMarketSuiteDetailed(page));
+}
+
+function hookMarketSuiteRunnerEvents (runner, page, key) {
+  if (runner._marketSuiteHooked) return;
+  runner._marketSuiteHooked = true;
+  const rawEmit = runner.emit.bind(runner);
+  const namespace = marketPageConfig(page).namespace;
+  runner.emit = (event, data) => {
+    rawEmit(event, data);
+    io.emit(`${namespace}:runner_event`, {
+      key,
+      page,
+      runnerId: runner.id,
+      event,
+      data,
+      status: runner._status(),
+      stats: runner.strategy.getFullState(),
+    });
+    if (['status', 'stats', 'session_info', 'position_opened', 'trade_closed', 'warmed_up'].includes(event)) {
+      emitMarketSuiteState(page).catch(e => console.error(`[${page}] emit state failed:`, e.message));
+    }
+  };
+}
+
+function ensureMarketSuiteRunner (doc) {
+  const page = doc.page;
+  const key = doc.key;
+  const feed = marketFeedManagers[page];
+  if (feed && doc.symbol) feed.setSymbol(doc.symbol);
+  let runner = marketSuiteRunners[page].get(key);
+  if (!runner) {
+    runner = new StrategyRunner(
+      marketRunnerId(page, key),
+      new MarketSuiteStrategy(marketSuiteStrategyOptions(doc)),
+      io,
+      {
+        sessionStrategyType: marketRunnerId(page, key),
+        displayName: `${marketPageConfig(page).label} • ${doc.name}`,
+      }
+    );
+    marketSuiteRunners[page].set(key, runner);
+    feed.addRunner(runner);
+    hookMarketSuiteRunnerEvents(runner, page, key);
+    runner.wire();
+  } else {
+    runner.displayName = `${marketPageConfig(page).label} • ${doc.name}`;
+    if (!runner.running) runner.strategy.reset(marketSuiteStrategyOptions(doc));
+    runner.wire();
+  }
+  return runner;
+}
+
+async function startMarketSuiteRunner (page, runner, opts = {}) {
+  const feed = marketFeedManagers[page];
+  await runner.start(opts);
+  try {
+    const hist = await feed.fetchHistory();
+    if (hist.length) await runner.warmUp(hist);
+  } catch (error) {
+    runner.log('warn', `History unavailable (${error.message}) — warming on live data`);
+  }
+  feed.ensureRunning();
+  const sessInfo = await runner.buildSessionInfo().catch(() => null);
+  if (sessInfo) io.emit(`${runner.id}:session_info`, sessInfo);
+  await manager.sendSessionsList(io);
+}
+
 function geminiBtcDefaultConfig () {
   return { ...GEMINI_BTC_DEFAULTS };
 }
@@ -1349,6 +1646,22 @@ async function resetRunnerToConfiguredState (runner) {
     });
     return;
   }
+  if (runner.id.startsWith('market:')) {
+    const [, page, key] = String(runner.id).split(':');
+    const doc = (page && key) ? await MarketSuiteStrategyConfig.findOne({ page, key }) : null;
+    await runner.reset(doc ? marketSuiteStrategyOptions(doc) : {
+      marketPage: page,
+      marketLabel: marketPageConfig(page).label,
+      symbol: defaultSymbolForMarket(page),
+      strategyKey: key,
+      timeframe: runner.strategy.timeframe || '5m',
+      capital: runner.strategy.initialCapital || 1000,
+      leverage: runner.strategy.leverage || 1,
+      buyFeePct: Number(runner.strategy.buyFeePct || 0) * 100,
+      sellFeePct: Number(runner.strategy.sellFeePct || 0) * 100,
+    });
+    return;
+  }
   if (runner.id === 'geminibtc') {
     const doc = await ensureGeminiBtcConfig();
     await runner.reset(geminiBtcStrategyOptions(doc));
@@ -1541,6 +1854,7 @@ const STRATEGY_LABELS = {
   breakout: 'Range Breakout',
   heikenashi: 'Heikin-Ashi SuperTrend',
   pine: 'Pine Strategy',
+  'market-suite': 'Market Strategy',
   llm: 'Gemini LLM Strategy',
   geminibtc: 'Gemini BTC Heikin-Ashi Scalper',
   utbot: 'UT Bot Alerts',
@@ -1565,6 +1879,11 @@ function strategyNameForSession (session, pineMap) {
     const key = type.slice('llm:'.length);
     return LLM_STRATEGY_DEFINITIONS.find(def => def.key === key)?.name || type;
   }
+  if (type.startsWith?.('market:')) {
+    const [, page, key] = type.split(':');
+    const def = MARKET_SUITE_DEFINITIONS.find(item => item.key === key);
+    return def ? `${marketPageConfig(page).label}: ${def.name}` : type;
+  }
   return STRATEGY_LABELS[type] || type;
 }
 
@@ -1578,6 +1897,70 @@ function sessionRunnerId (session) {
   if (!session) return null;
   if (session.strategyType === 'pine' && session.pineScriptId) return pineRunnerId(idString(session.pineScriptId));
   return session.strategyType || 'scalping';
+}
+
+function marketPageForRunnerId (runnerId = '') {
+  if (!String(runnerId).startsWith('market:')) return null;
+  return String(runnerId).split(':')[1] || null;
+}
+
+function managerForRunnerId (runnerId = '') {
+  const page = marketPageForRunnerId(runnerId);
+  if (page && marketFeedManagers[page]) return marketFeedManagers[page];
+  return manager;
+}
+
+function findRunnerById (runnerId = '') {
+  if (!runnerId) return null;
+  const marketPage = marketPageForRunnerId(runnerId);
+  if (marketPage) {
+    const [, , key] = String(runnerId).split(':');
+    return marketSuiteRunners[marketPage]?.get(key) || null;
+  }
+  return manager.getRunner(runnerId);
+}
+
+function allKnownRunners () {
+  return [
+    ...Object.values(manager.runners || {}),
+    ...MARKET_PAGE_ORDER.flatMap(page => [...marketSuiteRunners[page].values()]),
+  ];
+}
+
+function sessionsFilterFromScope ({ strategyType = '', runnerPrefix = '', runnerId = '' } = {}) {
+  if (strategyType === 'pine') return { strategyType: 'pine' };
+  if (runnerId === 'geminibtc') return { strategyType: 'geminibtc' };
+  if (runnerId === 'utbot') return { strategyType: 'utbot' };
+  if (runnerPrefix === 'allinone:') return { strategyType: /^allinone:/ };
+  if (runnerPrefix === 'llm:') return { strategyType: /^llm:/ };
+  if (runnerPrefix && runnerPrefix.startsWith('market:')) return { strategyType: new RegExp(`^${escapeRegex(runnerPrefix)}`) };
+  if (runnerId && runnerId.startsWith('market:')) return { strategyType: runnerId };
+  if (runnerId && runnerId.startsWith('allinone:')) return { strategyType: runnerId };
+  if (runnerId && runnerId.startsWith('llm:')) return { strategyType: runnerId };
+  return null;
+}
+
+function escapeRegex (value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function runnerMatchesScope (runner, { strategyType = '', runnerPrefix = '', runnerId = '' } = {}) {
+  if (!runner) return false;
+  if (strategyType === 'pine') return String(runner.id || '').startsWith('pine:');
+  if (runnerId) return runner.id === runnerId;
+  if (runnerPrefix) return String(runner.id || '').startsWith(runnerPrefix);
+  return false;
+}
+
+function runnerForceClosePrice (runner) {
+  const feed = managerForRunnerId(runner?.id);
+  const live = Number(feed?.currentTicker?.price);
+  if (Number.isFinite(live) && live > 0) return live;
+  const lastCandle = feed?.latestCandles?.[feed.latestCandles.length - 1];
+  const candleClose = Number(lastCandle?.close);
+  if (Number.isFinite(candleClose) && candleClose > 0) return candleClose;
+  const entry = Number(runner?.strategy?.position?.entry);
+  return Number.isFinite(entry) && entry > 0 ? entry : null;
 }
 
 function calcUnrealizedPnl (position, markPrice) {
@@ -1612,8 +1995,10 @@ function startStrategyWatchdog () {
   if (strategyWatchdogTimer) return;
   strategyWatchdogTimer = setInterval(() => {
     const runningCount = Object.values(manager.runners).filter(r => r.running).length;
-    if (!runningCount) return;
-    manager.ensureWs();
+    const marketRunning = MARKET_PAGE_ORDER.reduce((sum, page) => sum + [...marketSuiteRunners[page].values()].filter(r => r.running).length, 0);
+    if (!runningCount && !marketRunning) return;
+    if (runningCount) manager.ensureWs();
+    for (const page of MARKET_PAGE_ORDER) marketFeedManagers[page].ensureRunning();
     io.emit('all_status', manager.allStatus());
   }, STRATEGY_WATCHDOG_INTERVAL_MS);
 }
@@ -1695,10 +2080,14 @@ app.post('/api/strategy/:id/stop', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/strategy/:id/pause', (req, res) => {
-  const runner = manager.getRunner(req.params.id);
-  if (!runner) return res.status(404).json({ error: 'Unknown strategy' });
-  runner.pause(); io.emit('all_status', manager.allStatus()); res.json({ ok: true });
+app.post('/api/strategy/:id/pause', async (req, res) => {
+  try {
+    const runner = manager.getRunner(req.params.id);
+    if (!runner) return res.status(404).json({ error: 'Unknown strategy' });
+    runner.pause();
+    io.emit('all_status', manager.allStatus());
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/strategy/:id/resume', (req, res) => {
@@ -1749,12 +2138,31 @@ app.get('/api/strategy/:id/stats', (req, res) => {
   res.json(runner.strategy.getFullState());
 });
 
+app.post('/api/positions/force-close', async (req, res) => {
+  try {
+    const runnerId = String(req.body?.runnerId || '').trim();
+    if (!runnerId) return res.status(400).json({ error: 'runnerId is required' });
+    const runner = findRunnerById(runnerId);
+    if (!runner) return res.status(404).json({ error: 'Runner not found' });
+    const position = runner.strategy?.position;
+    if (!position) return res.status(400).json({ error: 'No open position to close' });
+    if (typeof runner.strategy._closePos !== 'function') return res.status(400).json({ error: 'Strategy does not support manual close' });
+    const exitPrice = runnerForceClosePrice(runner);
+    if (!Number.isFinite(exitPrice) || exitPrice <= 0) return res.status(400).json({ error: 'No valid mark price available to close position' });
+    runner.strategy._closePos(exitPrice, Date.now(), 'force_close');
+    io.emit('all_status', manager.allStatus());
+    await manager.sendSessionsList(io);
+    res.json({ ok: true, runnerId, exitPrice });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/positions', async (req, res) => {
   try {
     const requestedPineId = req.query.pineScriptId ? String(req.query.pineScriptId) : null;
     const directRunnerId = req.query.runnerId ? String(req.query.runnerId) : null;
+    const requestedRunnerPrefix = req.query.runnerPrefix ? String(req.query.runnerPrefix) : null;
     const requestedRunnerId = directRunnerId || (requestedPineId ? pineRunnerId(requestedPineId) : null);
-    const scopeTopLevelToRunner = Boolean(directRunnerId);
+    const scopeTopLevelToRunner = Boolean(directRunnerId || requestedRunnerPrefix);
     const fromMs = req.query.fromDate ? Date.parse(req.query.fromDate) : null;
     const toMs = req.query.toDate ? Date.parse(req.query.toDate) : null;
     const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000);
@@ -1784,16 +2192,19 @@ app.get('/api/positions', async (req, res) => {
       ? await PineScriptConfig.find({ _id: { $in: pineIds } }).lean()
       : [];
     const pineMap = new Map(pineDocs.map(p => [idString(p._id), p]));
-    const lastCandle = manager.latestCandles[manager.latestCandles.length - 1];
-    const markPrice = manager.currentTicker?.price || lastCandle?.close || null;
     const botStatus = {
       all: manager.allStatus(),
       pine: pineAggregateStatus(),
-      runningCount: Object.values(manager.runners).filter(r => r.running).length,
+      runningCount: Object.values(manager.runners).filter(r => r.running).length + MARKET_PAGE_ORDER.reduce((sum, page) => sum + [...marketSuiteRunners[page].values()].filter(r => r.running).length, 0),
+      markets: Object.fromEntries(MARKET_PAGE_ORDER.map(page => [page, marketAggregateStatus(page)])),
     };
 
     const open = openDocs.map(p => {
       const session = sessionMap.get(idString(p.sessionId));
+      const runnerId = sessionRunnerId(session);
+      const feed = managerForRunnerId(runnerId);
+      const lastCandle = feed?.latestCandles?.[feed.latestCandles.length - 1];
+      const markPrice = Number(feed?.currentTicker?.price || lastCandle?.close || null);
       const pnl = calcUnrealizedPnl(p, markPrice);
       return {
         id: idString(p._id),
@@ -1802,7 +2213,7 @@ app.get('/api/positions', async (req, res) => {
         shortId: idString(p.sessionId)?.slice(-6).toUpperCase() || null,
         strategyType: session?.strategyType || null,
         strategyName: strategyNameForSession(session, pineMap),
-        runnerId: sessionRunnerId(session),
+        runnerId,
         pineScriptId: idString(session?.pineScriptId),
         type: p.type,
         entry: p.entry,
@@ -1850,8 +2261,12 @@ app.get('/api/positions', async (req, res) => {
       };
     });
 
-    const selectedOpen = requestedRunnerId ? open.filter(p => p.runnerId === requestedRunnerId) : open;
-    const selectedClosed = requestedRunnerId ? closed.filter(t => t.runnerId === requestedRunnerId) : closed;
+    const selectedOpen = requestedRunnerId
+      ? open.filter(p => p.runnerId === requestedRunnerId)
+      : (requestedRunnerPrefix ? open.filter(p => String(p.runnerId || '').startsWith(requestedRunnerPrefix)) : open);
+    const selectedClosed = requestedRunnerId
+      ? closed.filter(t => t.runnerId === requestedRunnerId)
+      : (requestedRunnerPrefix ? closed.filter(t => String(t.runnerId || '').startsWith(requestedRunnerPrefix)) : closed);
     const visibleOpen = scopeTopLevelToRunner ? selectedOpen : open;
     const visibleClosed = scopeTopLevelToRunner ? selectedClosed : closed;
     const openPnl = visibleOpen.reduce((sum, p) => sum + (Number.isFinite(p.pnl) ? p.pnl : 0), 0);
@@ -1860,7 +2275,7 @@ app.get('/api/positions', async (req, res) => {
     const selectedClosedPnl = selectedClosed.reduce((sum, t) => sum + (Number(t.pnl) || 0), 0);
 
     res.json({
-      markPrice,
+      markPrice: requestedRunnerId && selectedOpen[0] ? selectedOpen[0].markPrice : null,
       summary: {
         openCount: visibleOpen.length,
         closedCount: visibleClosed.length,
@@ -1920,18 +2335,24 @@ app.get('/api/pnl/overview', async (req, res) => {
       ? await PineScriptConfig.find({ _id: { $in: pineIds } }).lean()
       : [];
     const pineMap = new Map(pineDocs.map(p => [idString(p._id), p]));
-    const lastCandle = manager.latestCandles[manager.latestCandles.length - 1];
-    const markPrice = manager.currentTicker?.price || lastCandle?.close || null;
     const runningIds = new Set(
       Object.values(manager.runners || {})
         .filter(r => r.running)
         .map(r => r.id)
     );
+    for (const page of MARKET_PAGE_ORDER) {
+      for (const runner of marketSuiteRunners[page].values()) {
+        if (runner.running) runningIds.add(runner.id);
+      }
+    }
 
     const open = openDocs.map(p => {
       const session = sessionMap.get(idString(p.sessionId));
-      const pnl = calcUnrealizedPnl(p, markPrice);
       const runnerId = sessionRunnerId(session);
+      const feed = managerForRunnerId(runnerId);
+      const lastCandle = feed?.latestCandles?.[feed.latestCandles.length - 1];
+      const markPrice = Number(feed?.currentTicker?.price || lastCandle?.close || null);
+      const pnl = calcUnrealizedPnl(p, markPrice);
       return {
         id: idString(p._id),
         sessionId: idString(p.sessionId),
@@ -2068,7 +2489,7 @@ app.get('/api/pnl/overview', async (req, res) => {
     const realizedPnl = closed.reduce((sum, row) => sum + (Number(row.pnl) || 0), 0);
 
     res.json({
-      markPrice,
+      markPrice: null,
       dateRange: {
         fromDate: Number.isFinite(fromMs) ? new Date(fromMs).toISOString().slice(0, 10) : null,
         toDate: Number.isFinite(toMs) ? new Date(toMs).toISOString().slice(0, 10) : null,
@@ -2093,7 +2514,7 @@ app.get('/api/pnl/overview', async (req, res) => {
 
 app.post('/api/positions/reset-all', async (_req, res) => {
   try {
-    const runners = Object.values(manager.runners || {});
+    const runners = allKnownRunners();
     for (const runner of runners) await resetRunnerToConfiguredState(runner);
 
     await Promise.all([
@@ -2105,17 +2526,61 @@ app.post('/api/positions/reset-all', async (_req, res) => {
     ]);
 
     manager.maybeStopWs();
+    for (const page of MARKET_PAGE_ORDER) marketFeedManagers[page].maybeStop();
     await Promise.all([
       emitPineState(),
       emitAllInOneState(),
       emitLLMState(),
       emitGeminiBtcState(),
       emitUTBotState(),
+      ...MARKET_PAGE_ORDER.map(page => emitMarketSuiteState(page)),
       manager.sendSessionsList(io),
     ]);
     io.emit('all_status', manager.allStatus());
 
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/positions/reset-scoped', async (req, res) => {
+  try {
+    const scope = {
+      strategyType: String(req.body?.strategyType || '').trim(),
+      runnerPrefix: String(req.body?.runnerPrefix || '').trim(),
+      runnerId: String(req.body?.runnerId || '').trim(),
+    };
+    const sessionFilter = sessionsFilterFromScope(scope);
+    if (!sessionFilter) return res.status(400).json({ error: 'A valid scope is required' });
+
+    const matchingRunners = allKnownRunners().filter(runner => runnerMatchesScope(runner, scope));
+    for (const runner of matchingRunners) await resetRunnerToConfiguredState(runner);
+
+    const sessions = await Session.find(sessionFilter).select('_id').lean();
+    const sessionIds = sessions.map(session => session._id);
+    if (sessionIds.length) {
+      await Promise.all([
+        Position.deleteMany({ sessionId: { $in: sessionIds } }),
+        Trade.deleteMany({ sessionId: { $in: sessionIds } }),
+        DailyPnl.deleteMany({ sessionId: { $in: sessionIds } }),
+        Equity.deleteMany({ sessionId: { $in: sessionIds } }),
+        Session.deleteMany({ _id: { $in: sessionIds } }),
+      ]);
+    }
+
+    manager.maybeStopWs();
+    for (const page of MARKET_PAGE_ORDER) marketFeedManagers[page].maybeStop();
+    await Promise.all([
+      emitPineState(),
+      emitAllInOneState(),
+      emitLLMState(),
+      emitGeminiBtcState(),
+      emitUTBotState(),
+      ...MARKET_PAGE_ORDER.map(page => emitMarketSuiteState(page)),
+      manager.sendSessionsList(io),
+    ]);
+    io.emit('all_status', manager.allStatus());
+
+    res.json({ ok: true, deletedSessions: sessionIds.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2559,6 +3024,131 @@ app.post('/api/allinone/strategies/:key/reset', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/markets/:page/strategies', async (req, res) => {
+  try {
+    const page = req.params.page;
+    if (!MARKET_PAGE_CONFIGS[page]) return res.status(404).json({ error: 'Market page not found' });
+    res.json(await listMarketSuiteDetailed(page));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/markets/:page/settings', async (req, res) => {
+  try {
+    const page = req.params.page;
+    if (!MARKET_PAGE_CONFIGS[page]) return res.status(404).json({ error: 'Market page not found' });
+    await ensureMarketSuiteConfigs(page);
+    const doc = await MarketSuiteStrategyConfig.findOne({ page }).sort({ updatedAt: -1 }).lean();
+    res.json(marketCommonSettingsView(page, doc));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/markets/:page/settings', async (req, res) => {
+  try {
+    const page = req.params.page;
+    if (!MARKET_PAGE_CONFIGS[page]) return res.status(404).json({ error: 'Market page not found' });
+    const settings = await saveCommonMarketSuiteSettings(page, req.body || {});
+    await emitMarketSuiteState(page);
+    res.json({ ok: true, settings });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/markets/:page/strategies/:key', async (req, res) => {
+  try {
+    const { page, key } = req.params;
+    if (!MARKET_PAGE_CONFIGS[page]) return res.status(404).json({ error: 'Market page not found' });
+    await ensureMarketSuiteConfigs(page);
+    const doc = await MarketSuiteStrategyConfig.findOne({ page, key }).lean();
+    if (!doc) return res.status(404).json({ error: 'Strategy not found' });
+    res.json(await marketSuiteRunnerSnapshot(doc));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/markets/:page/strategies/:key/settings', async (req, res) => {
+  try {
+    const { page, key } = req.params;
+    if (!MARKET_PAGE_CONFIGS[page]) return res.status(404).json({ error: 'Market page not found' });
+    await saveCommonMarketSuiteSettings(page, req.body || {});
+    const doc = await MarketSuiteStrategyConfig.findOne({ page, key });
+    if (!doc) return res.status(404).json({ error: 'Strategy not found' });
+    applyMarketSuiteRuntimeOptions(doc, req.body || {});
+    await doc.save();
+    const runner = ensureMarketSuiteRunner(doc);
+    if (!runner.running) await runner.reset(marketSuiteStrategyOptions(doc));
+    await emitMarketSuiteState(page);
+    res.json({ ok: true, strategy: await marketSuiteRunnerSnapshot(doc.toObject()) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/markets/:page/strategies/:key/start', async (req, res) => {
+  try {
+    const { page, key } = req.params;
+    if (!MARKET_PAGE_CONFIGS[page]) return res.status(404).json({ error: 'Market page not found' });
+    if (req.body && Object.keys(req.body).length) await saveCommonMarketSuiteSettings(page, req.body);
+    const doc = await MarketSuiteStrategyConfig.findOne({ page, key });
+    if (!doc) return res.status(404).json({ error: 'Strategy not found' });
+    applyMarketSuiteRuntimeOptions(doc, req.body || {});
+    doc.isActive = true;
+    await doc.save();
+    const runner = ensureMarketSuiteRunner(doc);
+    if (req.body && Object.keys(req.body).length) await runner.reset(marketSuiteStrategyOptions(doc));
+    await startMarketSuiteRunner(page, runner, { createNew: false });
+    await emitMarketSuiteState(page);
+    res.json({ ok: true, page, key: doc.key, runnerId: runner.id, sessionId: runner.sessionId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/markets/:page/strategies/:key/stop', async (req, res) => {
+  try {
+    const { page, key } = req.params;
+    const runner = marketSuiteRunners[page]?.get(key);
+    if (!runner) return res.status(404).json({ error: 'Strategy runner not found' });
+    await runner.stop();
+    marketFeedManagers[page].maybeStop();
+    await emitMarketSuiteState(page);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/markets/:page/strategies/:key/pause', async (req, res) => {
+  try {
+    const { page, key } = req.params;
+    const runner = marketSuiteRunners[page]?.get(key);
+    if (!runner) return res.status(404).json({ error: 'Strategy runner not found' });
+    runner.pause();
+    await emitMarketSuiteState(page);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/markets/:page/strategies/:key/resume', async (req, res) => {
+  try {
+    const { page, key } = req.params;
+    const runner = marketSuiteRunners[page]?.get(key);
+    if (!runner) return res.status(404).json({ error: 'Strategy runner not found' });
+    runner.resume();
+    await emitMarketSuiteState(page);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/markets/:page/strategies/:key/reset', async (req, res) => {
+  try {
+    const { page, key } = req.params;
+    if (!MARKET_PAGE_CONFIGS[page]) return res.status(404).json({ error: 'Market page not found' });
+    if (req.body && Object.keys(req.body).length) await saveCommonMarketSuiteSettings(page, req.body);
+    const doc = await MarketSuiteStrategyConfig.findOne({ page, key });
+    if (!doc) return res.status(404).json({ error: 'Strategy not found' });
+    applyMarketSuiteRuntimeOptions(doc, req.body || {});
+    await doc.save();
+    const runner = ensureMarketSuiteRunner(doc);
+    await runner.reset(marketSuiteStrategyOptions(doc));
+    marketFeedManagers[page].maybeStop();
+    await emitMarketSuiteState(page);
+    await manager.sendSessionsList(io);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/llm/strategies', async (_req, res) => {
   try {
     res.json(await listLLMDetailed());
@@ -2834,11 +3424,16 @@ app.get('/api/sessions', async (_req, res) => {
 io.on('connection', async socket => {
   console.log(`[WS] Client connected: ${socket.id}`);
   await manager.sendInitialState(socket);
+  for (const page of MARKET_PAGE_ORDER) await marketFeedManagers[page].sendInitialState(socket);
   socket.emit('pine:status', pineAggregateStatus());
   socket.emit('pine:runners', await listPineScriptsDetailed());
   socket.emit('pine:scripts', await listPineScriptsDetailed());
   socket.emit('allinone:status', allInOneAggregateStatus());
   socket.emit('allinone:runners', await listAllInOneDetailed());
+  for (const page of MARKET_PAGE_ORDER) {
+    socket.emit(`${marketPageConfig(page).namespace}:status`, marketAggregateStatus(page));
+    socket.emit(`${marketPageConfig(page).namespace}:runners`, await listMarketSuiteDetailed(page));
+  }
   socket.emit('llm:status', llmAggregateStatus());
   socket.emit('llm:runners', await listLLMDetailed());
   socket.emit('geminibtc:status', geminiBtcAggregateStatus());
@@ -2847,7 +3442,7 @@ io.on('connection', async socket => {
   socket.emit('utbot:state', await utBotSnapshot(await ensureUTBotConfig()));
   socket.emit('log', {
     level: 'info',
-    msg: `👋 Dashboard connected — EMA: ${scalpRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Breakout: ${breakoutRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | HA: ${haRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Pine bots: ${pineAggregateStatus().runningCount} running | All-in-One: ${allInOneAggregateStatus().runningCount} running | LLM: ${llmAggregateStatus().runningCount} running | Gemini BTC: ${geminiBtcAggregateStatus().running ? 'RUNNING' : 'STOPPED'} | UT Bot: ${utBotAggregateStatus().running ? 'RUNNING' : 'STOPPED'}`,
+    msg: `👋 Dashboard connected — EMA: ${scalpRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Breakout: ${breakoutRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | HA: ${haRunner.running ? '🟢 RUNNING' : '🔴 STOPPED'} | Pine bots: ${pineAggregateStatus().runningCount} running | All-in-One: ${allInOneAggregateStatus().runningCount} running | BTC page: ${marketAggregateStatus('btc').runningCount} running | Gold page: ${marketAggregateStatus('gold').runningCount} running | FX page: ${marketAggregateStatus('forex').runningCount} running | LLM: ${llmAggregateStatus().runningCount} running | Gemini BTC: ${geminiBtcAggregateStatus().running ? 'RUNNING' : 'STOPPED'} | UT Bot: ${utBotAggregateStatus().running ? 'RUNNING' : 'STOPPED'}`,
     time: Date.now(),
   });
 });
@@ -2859,6 +3454,7 @@ async function bootstrap () {
   try { await db.connect(); }
   catch (e) { console.error('[FATAL] MongoDB:', e.message); process.exit(1); }
   await ensureAllInOneConfigs();
+  for (const page of MARKET_PAGE_ORDER) await ensureMarketSuiteConfigs(page);
   await ensureLLMConfigs();
   const geminiBtcDoc = await ensureGeminiBtcConfig();
   const restoredGeminiBtcRunner = ensureGeminiBtcRunner(geminiBtcDoc);
@@ -2882,6 +3478,18 @@ async function bootstrap () {
     if (saved && saved.isRunning) {
       console.log(`[Boot] Auto-resuming ${runner.id} (${doc.name})...`);
       await startRunner(runner, { createNew: false });
+    }
+  }
+
+  for (const page of MARKET_PAGE_ORDER) {
+    const docs = await MarketSuiteStrategyConfig.find({ page }).lean().catch(() => []);
+    for (const doc of docs) {
+      const runner = ensureMarketSuiteRunner(doc);
+      const saved = await runner.restoreFromDB();
+      if (saved && saved.isRunning) {
+        console.log(`[Boot] Auto-resuming ${runner.id} (${doc.name})...`);
+        await startMarketSuiteRunner(page, runner, { createNew: false });
+      }
     }
   }
 
@@ -2932,6 +3540,7 @@ async function bootstrap () {
     console.log(`  🗄️   MongoDB: ${process.env.MONGO_URI || 'mongodb://localhost:27017/btc_scalping_bot'}`);
     console.log('  🧾  Position source: local MongoDB only');
     console.log('  📝  Mode: PAPER TRADING  |  Strategies run 24/7 on server');
+    console.log('  🌍  New pages: /btc.html  /gold.html  /forex.html');
     console.log('═'.repeat(62) + '\n');
   });
 }

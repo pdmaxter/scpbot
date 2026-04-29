@@ -196,6 +196,24 @@ const utBotConfigSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  MarketSuiteStrategyConfig — persisted settings for BTC / Gold / FX pages
+// ─────────────────────────────────────────────────────────────────────────────
+const marketSuiteStrategyConfigSchema = new mongoose.Schema({
+  page:     { type: String, required: true, index: true },
+  symbol:   { type: String, default: '' },
+  key:      { type: String, required: true },
+  name:     { type: String, required: true },
+  timeframe:{ type: String, default: '5m' },
+  capital:  { type: Number, default: 1000 },
+  leverage: { type: Number, default: 1 },
+  buyFeePct:{ type: Number, default: 0 },
+  sellFeePct:{ type: Number, default: 0 },
+  isActive: { type: Boolean, default: false, index: true },
+}, { timestamps: true });
+
+marketSuiteStrategyConfigSchema.index({ page: 1, key: 1 }, { unique: true });
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  MT5ConnectionConfig — persisted MetaTrader 5 / Exness connection settings
 // ─────────────────────────────────────────────────────────────────────────────
 const mt5ConnectionConfigSchema = new mongoose.Schema({
@@ -232,5 +250,6 @@ module.exports = {
   LLMStrategyConfig: mongoose.model('LLMStrategyConfig', llmStrategyConfigSchema),
   GeminiBTCConfig: mongoose.model('GeminiBTCConfig', geminiBtcConfigSchema),
   UTBotConfig: mongoose.model('UTBotConfig', utBotConfigSchema),
+  MarketSuiteStrategyConfig: mongoose.model('MarketSuiteStrategyConfig', marketSuiteStrategyConfigSchema),
   MT5ConnectionConfig: mongoose.model('MT5ConnectionConfig', mt5ConnectionConfigSchema),
 };

@@ -8,12 +8,12 @@
 <script src="/socket.io/socket.io.js"></script>
 <style>
 :root {
-  --bg:      #f5f7fb; --panel:  #ffffff; --panel2: #f7f9fc;
-  --border:  #d9e0ea; --text:   #182230; --muted:  #667085;
-  --green:   #00e676; --red:    #ff3d57; --blue:   #2979ff;
-  --orange:  #ff9100; --purple: #ce93d8; --yellow: #ffd740;
+  --bg:      #0b1220; --panel:  #111827; --panel2: #0f172a;
+  --border:  #253045; --text:   #e5edf7; --muted:  #93a4bb;
+  --green:   #00e676; --red:    #ff5c74; --blue:   #58a6ff;
+  --orange:  #ffb454; --purple: #ce93d8; --yellow: #ffd740;
   --teal:    #00bcd4; --pink:   #f48fb1;
-  --font: 'Segoe UI', system-ui, sans-serif;
+  --font: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace;
 }
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px;overflow:hidden;}
@@ -63,6 +63,11 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .btn-reset{background:#66708520;color:var(--muted);border:1px solid var(--border);}
 .btn-new{background:#2979ff22;color:var(--blue);border:1px solid #2979ff44;}
 .btn:hover{opacity:.82;}
+.header,.card,.panel,.modal,.session-list,.pos-box,.report-box,.new-sess-form,.inp,.logs,.modal-body,.status-card,.positions-box{background:var(--panel)}
+.strategy-tab-btn:hover{background:#182234}
+.brand,.metric-val{font-size:13px}
+.strategy-tab-btn,.inp,.btn,.sess-grid,.pos-empty,.pos-val,.tab,.price-chg,.ticker-row,.script-status,.script-row,.report-box,.sess-badge,.status-chip,.log-line,.sessions-table,.pos-table{font-size:11px}
+.card-title,.inp-label{font-size:10px}
 .btn:disabled{opacity:.3;cursor:not-allowed;}
 .btn-row{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px;}
 .new-sess-form{display:none;margin-bottom:7px;padding:7px;background:var(--panel2);border-radius:4px;border:1px solid var(--border);}

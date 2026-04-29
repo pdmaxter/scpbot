@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gold Strategy Bot</title>
+<link rel="stylesheet" href="/market-suite.css">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<script>window.MARKET_PAGE_CONFIG={page:'gold',title:'Gold Strategy Bot',namespace:'goldpage',label:'Gold',symbol:'XAUUSD=X',symbolOptions:['XAUUSD=X']};</script>
+<div class="page">
+  <header class="header">
+    <div class="brand" id="brand-label">Gold Strategy Bot</div>
+    <div class="price" id="header-price">--</div>
+    <div class="spacer"></div>
+    <div class="status-strip">
+      <span class="pill mode" id="page-label">GOLD</span>
+      <span class="pill"><span class="dot" id="run-dot"></span><span id="run-label">STOPPED</span></span>
+      <span class="pill">Feed <span id="ws-feed" class="neg">OFF</span></span>
+      <a class="link-btn" href="/btc.html">BTC</a>
+      <a class="link-btn" href="/forex.html">FX</a>
+      <a class="link-btn" href="/pnl.html">PNL</a>
+      <a class="link-btn" href="/pine.html">Pine</a>
+      <a class="link-btn" href="/allinone.html">All-in-One</a>
+      <a class="link-btn" href="/llm.html">Gemini LLM</a>
+      <a class="link-btn" href="/geminibtc.html">Gemini BTC</a>
+      <form method="POST" action="/logout" style="margin:0"><button class="ghost-btn" type="submit">Logout</button></form>
+    </div>
+  </header>
+  <main class="main">
+    <div class="stack">
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Gold Indicators / Strategies</div><div class="subtle">24hr server-side runner</div></div>
+        <div class="panel-body">
+          <div id="strategy-list" class="script-list"><div class="empty">Loading strategies...</div></div>
+          <div class="grid3" style="margin-top:10px">
+            <div class="field"><label class="label" for="symbol">Symbol</label><select class="inp" id="symbol"></select></div>
+            <div class="field"><label class="label" for="timeframe">Timeframe</label><select class="inp" id="timeframe"><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option></select></div>
+            <div class="field"><label class="label" for="capital">Capital</label><input class="inp" id="capital" type="number" min="100" step="100" value="1000"></div>
+          </div>
+          <div class="grid3" style="margin-top:8px">
+            <div class="field"><label class="label" for="leverage">Leverage</label><input class="inp" id="leverage" type="number" min="1" step="1" value="1"></div>
+            <div class="field"><label class="label" for="buy-fee-pct">Buy fee %</label><input class="inp" id="buy-fee-pct" type="number" min="0" step="0.01" value="0"></div>
+            <div class="field"><label class="label" for="sell-fee-pct">Sell fee %</label><input class="inp" id="sell-fee-pct" type="number" min="0" step="0.01" value="0"></div>
+          </div>
+          <div class="btn-row">
+            <button class="ghost-btn" type="button" onclick="saveSettings()">Save Settings</button>
+            <button class="solid-btn" type="button" onclick="startSelected()">Start</button>
+            <button class="danger-btn" type="button" onclick="stopSelected()">Stop</button>
+            <button class="ghost-btn" type="button" onclick="pauseSelected()">Pause</button>
+            <button class="ghost-btn" type="button" onclick="resumeSelected()">Resume</button>
+            <button class="ghost-btn" type="button" onclick="resetSelected()">Reset</button>
+          </div>
+        </div>
+      </section>
+      <section class="panel"><div class="panel-head"><div class="panel-title">Selected Strategy</div><div class="muted" id="session-badge">No session</div></div><div class="panel-body"><div id="status-card" class="status-card muted">Loading...</div></div></section>
+    </div>
+    <div class="stack">
+      <section class="panel"><div class="panel-head"><div class="panel-title" id="chart-title">Gold Candles / Selected State</div><div class="muted" id="chart-last">Waiting for candles</div></div><div class="chart-wrap"><div id="chart-state" class="chart-state"><div class="chart-state-title">Selected Strategy</div><div class="chart-state-main" id="chart-strategy">No strategy selected</div><div class="chart-state-sub"><span id="chart-run-state">Stopped</span><span id="chart-pos-state">Flat</span><span id="chart-pnl-state">P&L --</span></div></div><div id="price-chart"></div></div></section>
+      <section class="panel"><div class="panel-head"><div class="panel-title">Paper Positions / PNL</div><div class="muted" id="positions-updated-at">Waiting for local data</div></div><div class="panel-body"><div class="sync-strip"><span class="pill" id="positions-bot-pill">BOTS --</span><button class="link-btn" type="button" onclick="loadPositions(true)">Refresh</button><button class="danger-btn" type="button" onclick="resetAllPaperData()">Delete All Positions</button></div><div class="positions-metrics"><div class="metric"><div class="metric-label">Open</div><div class="metric-value" id="pos-open-count">0</div></div><div class="metric"><div class="metric-label">Closed</div><div class="metric-value" id="pos-closed-count">0</div></div><div class="metric"><div class="metric-label">Open PNL</div><div class="metric-value" id="pos-open-pnl">$0.00</div></div><div class="metric"><div class="metric-label">Closed PNL</div><div class="metric-value" id="pos-closed-pnl">$0.00</div></div><div class="metric"><div class="metric-label">Net PNL</div><div class="metric-value" id="pos-net-pnl">$0.00</div></div></div><div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>SL</th><th>Trail SL</th><th>TP</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Lev</th><th>Time</th><th>Action</th></tr></thead><tbody id="positions-open-body"><tr><td colspan="15" class="muted">No open positions.</td></tr></tbody></table></div></div></section>
+      <section class="panel"><div class="panel-head"><div class="panel-title">Closed Positions</div></div><div class="panel-body"><div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Exit</th><th>SL</th><th>Trail SL</th><th>TP</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Lev</th><th>Reason</th><th>Exit Time</th></tr></thead><tbody id="positions-closed-body"><tr><td colspan="15" class="muted">No closed positions.</td></tr></tbody></table></div></div></section>
+      <section class="panel"><div class="panel-head"><div class="panel-title">Activity</div><button class="ghost-btn" type="button" onclick="clearLog()">Clear</button></div><div class="panel-body"><div id="log" class="log"></div></div></section>
+    </div>
+  </main>
+</div>
+<script src="/market-suite.js"></script>
+</body>
+</html>

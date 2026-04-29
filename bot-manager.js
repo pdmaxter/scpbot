@@ -109,7 +109,7 @@ class StrategyRunner {
             sessionId: this.sessionId,
           },
           { upsert: true, new: true }
-        ).catch(() => {});
+        ).catch(e => console.error(`[${id}] Position update failed:`, e.message));
       }
       if (this.onPositionOpened) {
         await this.onPositionOpened(pos, this).catch(e => console.error(`[${id}] External open handler failed:`, e.message));
@@ -282,7 +282,7 @@ class StrategyRunner {
           llmCostUsd: Number(llmCost.totalUsd || 0),
           llmPromptTokens: Number(llmCost.promptTokens || 0),
           llmOutputTokens: Number(llmCost.outputTokens || 0),
-          llmThoughtTokens: Number(llmCost.thoughtsTokens || 0),
+          llmThoughtTokens: Number(llmCost.thoughtTokens || 0),
           llmCallCount: Number(llmCost.totalCalls || 0),
         } : {}),
       }).catch(() => {});
@@ -291,8 +291,9 @@ class StrategyRunner {
     this.candlesSinceSave++;
     if (this.candlesSinceSave >= EQUITY_SNAP_EVERY && this.sessionId) {
       this.candlesSinceSave = 0;
-      await Equity.create({ sessionId: this.sessionId, time: candle.openTime, equity: this.strategy.capital })
-        .catch(() => {});
+      try {
+        await Equity.create({ sessionId: this.sessionId, time: candle.openTime, equity: this.strategy.capital });
+      } catch (e) { console.error(`[${id}] Equity save failed:`, e.message); }
       this.emit('equity_point', { time: Math.floor(candle.openTime / 1000), equity: this.strategy.capital });
     }
   }
@@ -351,7 +352,7 @@ class StrategyRunner {
     const todayStr    = today();
     const todayTrades = s.trades.filter(t => utcDate(t.exitTime) === todayStr);
     const todayPnl    = todayTrades.reduce((sum, t) => sum + t.pnl, 0);
-    const todayStart  = sess.dailyStartCapital ?? (s.capital - todayPnl);
+    const todayStart  = sess.dailyStartCapital !== null && sess.dailyStartCapital !== undefined ? sess.dailyStartCapital : (s.capital - todayPnl);
     s.setDailyContext(todayStr, todayStart);
     if ('totalLlmCostUsd' in s) s.totalLlmCostUsd = Number(sess.llmCostUsd || 0);
     if ('totalPromptTokens' in s) s.totalPromptTokens = Number(sess.llmPromptTokens || 0);

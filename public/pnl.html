@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PNL Dashboard</title>
 <style>
-:root{--bg:#f5f7fb;--panel:#ffffff;--panel2:#f7f9fc;--line:#d9e0ea;--text:#182230;--muted:#667085;--green:#00e676;--red:#ff3d57;--blue:#2979ff;--yellow:#ffd740;--font:'Segoe UI',system-ui,sans-serif}
+:root{--bg:#0b1220;--panel:#111827;--panel2:#0f172a;--line:#253045;--text:#e5edf7;--muted:#93a4bb;--green:#00e676;--red:#ff5c74;--blue:#58a6ff;--yellow:#ffd740;--font:ui-monospace,SFMono-Regular,Menlo,Consolas,'Courier New',monospace}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
 .page{min-height:100vh;display:grid;grid-template-rows:56px 1fr}
@@ -34,6 +34,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var
 .muted{color:var(--muted)}.pos{color:var(--green)}.neg{color:var(--red)}.warn{color:var(--yellow)}
 .table-wrap{overflow:auto;max-height:320px;border:1px solid var(--line);border-radius:4px;background:var(--panel2)}
 table{width:100%;border-collapse:collapse;font-size:11px}
+.brand{font-size:15px}.pill,.label,.metric-label,th{font-size:10px}.link-btn,.ghost-btn,.solid-btn,.panel-title,table{font-size:11px}.metric-value{font-size:18px}.inp{background:var(--panel);color:var(--text);border-color:var(--line)}.ghost-btn{background:#1a2233}.tableWrap,.panel,.panel-head{border-color:var(--line)}th{background:#111827}td{border-bottom:1px solid var(--line)}
 th{position:sticky;top:0;background:#f3f5f9;color:var(--muted);font-size:10px;text-align:left;padding:7px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:7px;border-bottom:1px solid #e5e7eb;white-space:nowrap}
 tr:last-child td{border-bottom:0}
@@ -53,6 +54,9 @@ tr:last-child td{border-bottom:0}
     <div class="status-strip">
       <span class="pill mode">ALL STRATEGIES</span>
       <span class="pill" id="refresh-pill">Auto refresh 5s</span>
+      <a class="link-btn" href="/btc.html">BTC</a>
+      <a class="link-btn" href="/gold.html">Gold</a>
+      <a class="link-btn" href="/forex.html">FX</a>
       <a class="link-btn" href="/pine.html">Pine Upload</a>
       <a class="link-btn" href="/allinone.html">All-in-One</a>
       <a class="link-btn" href="/geminibtc.html">Gemini BTC</a>

@@ -8,10 +8,10 @@
 <script src="/socket.io/socket.io.js"></script>
 <style>
 :root {
-  --bg:#f5f7fb; --panel:#ffffff; --panel2:#f7f9fc; --line:#d9e0ea;
-  --text:#182230; --muted:#667085; --green:#00e676; --red:#ff3d57;
-  --blue:#2979ff; --yellow:#ffd740; --pink:#f48fb1; --orange:#ff9100;
-  --font:'Segoe UI',system-ui,sans-serif;
+  --bg:#0b1220; --panel:#111827; --panel2:#0f172a; --line:#253045;
+  --text:#e5edf7; --muted:#93a4bb; --green:#00e676; --red:#ff5c74;
+  --blue:#58a6ff; --yellow:#ffd740; --pink:#f48fb1; --orange:#ffb454;
+  --font:ui-monospace,SFMono-Regular,Menlo,Consolas,'Courier New',monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
@@ -91,6 +91,7 @@ tr:last-child td{border-bottom:0}
 .report{margin-top:10px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:10px;min-height:88px}
 .log{height:190px;overflow:auto;background:#ffffff;border:1px solid var(--line);border-radius:4px}
 .log-line{display:grid;grid-template-columns:72px 1fr;gap:8px;padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:11px}
+.brand{font-size:15px}.price{font-size:18px}.pill,.inp-label,.metric-label,th,.chart-state-title,.label{font-size:10px}.link-btn,.ghost-btn,.solid-btn,.danger-btn,.panel-title,.script-meta,.chart-state-sub,table,.log-line,.inp,.btn{font-size:11px}.chart-state-main,.metric-val,.small-value{font-size:13px}.metric-value{font-size:18px}.inp,.code,.check-row,.log{background:var(--panel);color:var(--text);border-color:var(--line)}.ghost-btn{background:#1a2233}.script-row:hover,.script-row.active{background:#182234}.chart-wrap{background:var(--bg)}.chart-state{background:rgba(17,24,39,.92)}th{background:#111827}td,.log-line{border-bottom:1px solid var(--line)}
 .log-line:last-child{border-bottom:0}
 .log-time{color:var(--muted)}
 .empty{color:var(--muted);padding:14px;text-align:center}
@@ -124,6 +125,9 @@ tr:last-child td{border-bottom:0}
       <span class="pill"><span class="dot" id="pine-dot"></span><span id="pine-label">STOPPED</span></span>
       <span class="pill">K <span id="ws-kline" class="neg">OFF</span></span>
       <span class="pill">T <span id="ws-ticker" class="neg">OFF</span></span>
+      <a class="link-btn" href="/btc.html">BTC</a>
+      <a class="link-btn" href="/gold.html">Gold</a>
+      <a class="link-btn" href="/forex.html">FX</a>
       <a class="link-btn" href="/pnl.html">PNL</a>
       <a class="link-btn" href="/geminibtc.html">Gemini BTC</a>
       <a class="link-btn" href="/llm.html">Gemini LLM</a>
@@ -242,8 +246,8 @@ tr:last-child td{border-bottom:0}
           </div>
           <div class="table-wrap">
             <table class="wide-table">
-              <thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Time</th><th>Session</th></tr></thead>
-              <tbody id="positions-open-body"><tr><td colspan="11" class="muted">No open positions.</td></tr></tbody>
+              <thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Time</th><th>Session</th><th>Action</th></tr></thead>
+              <tbody id="positions-open-body"><tr><td colspan="12" class="muted">No open positions.</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -1163,8 +1167,8 @@ function renderExchangeOpen (rows = []) {
       <td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td>
       <td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${fmtUSD(p.marginUsed)}</td><td>${fmtLots(p.lots || p.size || p.qty)}</td>
       <td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td>
-      <td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td>
-    </tr>`).join('') : '<tr><td colspan="11" class="muted">No open positions.</td></tr>';
+      <td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td><td><button class="danger-btn" type="button" onclick="forceClosePosition('${esc(p.runnerId || '')}')">Force Close</button></td>
+    </tr>`).join('') : '<tr><td colspan="12" class="muted">No open positions.</td></tr>';
 }
 
 function renderExchangeClosed (rows = []) {
@@ -1200,14 +1204,25 @@ async function loadPaperPositions (forced = false) {
 }
 
 async function resetAllPaperData () {
-  if (!confirm('Delete all paper positions, trades, and P&L history? This will stop running paper bots and reset all sessions.')) return;
+  if (!confirm('Delete Pine page positions, trades, and P&L history only? This will stop Pine bots on this page and reset Pine sessions.')) return;
   try {
-    await api('/api/positions/reset-all', { method:'POST' });
+    await api('/api/positions/reset-scoped', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ strategyType:'pine' }) });
     await loadSelectedRuntime();
     await loadPaperPositions();
-    addLog('warn', 'All paper positions, trades, and P&L were deleted.');
+    addLog('warn', 'Pine page positions, trades, and P&L were deleted.');
   } catch (err) {
-    addLog('error', `Delete all failed: ${err.message}`);
+    addLog('error', `Delete Pine positions failed: ${err.message}`);
+  }
+}
+
+async function forceClosePosition (runnerId) {
+  if (!runnerId || !confirm('Force close this open position at current mark price?')) return;
+  try {
+    await api('/api/positions/force-close', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ runnerId }) });
+    await loadPaperPositions(true);
+    addLog('warn', 'Position force closed.');
+  } catch (err) {
+    addLog('error', `Force close failed: ${err.message}`);
   }
 }
 

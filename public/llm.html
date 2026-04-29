@@ -7,7 +7,7 @@
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <style>
-:root{--bg:#f5f7fb;--panel:#ffffff;--panel2:#f7f9fc;--line:#d9e0ea;--text:#182230;--muted:#667085;--green:#00e676;--red:#ff3d57;--blue:#2979ff;--yellow:#ffd740;--pink:#f48fb1;--orange:#ff9100;--font:'Segoe UI',system-ui,sans-serif}
+:root{--bg:#0b1220;--panel:#111827;--panel2:#0f172a;--line:#253045;--text:#e5edf7;--muted:#93a4bb;--green:#00e676;--red:#ff5c74;--blue:#58a6ff;--yellow:#ffd740;--pink:#f48fb1;--orange:#ffb454;--font:ui-monospace,SFMono-Regular,Menlo,Consolas,'Courier New',monospace}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
 .page{min-height:100vh;display:grid;grid-template-rows:56px 1fr}
@@ -44,6 +44,7 @@ button:disabled{opacity:.35;cursor:not-allowed}
 .positions-metrics{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:8px;margin-bottom:10px}.sync-strip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .table-wrap{overflow:auto;max-height:285px;border:1px solid var(--line);border-radius:4px;background:var(--panel2)}.wide-table{min-width:920px}table{width:100%;border-collapse:collapse;font-size:11px}th{position:sticky;top:0;background:#f3f5f9;color:var(--muted);font-size:10px;text-align:left;padding:7px;border-bottom:1px solid var(--line);white-space:nowrap}td{padding:7px;border-bottom:1px solid #e5e7eb;white-space:nowrap}tr:last-child td{border-bottom:0}
 .log{height:160px;overflow:auto;background:#ffffff;border:1px solid var(--line);border-radius:4px}.log-line{display:grid;grid-template-columns:72px 1fr;gap:8px;padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:11px}.log-time{color:var(--muted)}.empty{color:var(--muted);padding:14px;text-align:center}
+.brand{font-size:15px}.price{font-size:18px}.pill,.label,.metric-label,th,.chart-state-title{font-size:10px}.link-btn,.ghost-btn,.solid-btn,.danger-btn,.panel-title,.script-meta,.chart-state-sub,table,.log-line{font-size:11px}.chart-state-main{font-size:13px}.metric-value{font-size:18px}.inp,.check-row,.log{background:var(--panel);color:var(--text);border-color:var(--line)}.ghost-btn{background:#1a2233}.script-row:hover,.script-row.active{background:#182234}.chart-wrap{background:var(--bg)}.chart-state{background:rgba(17,24,39,.92)}th{background:#111827}td,.log-line{border-bottom:1px solid var(--line)}
 @media (max-width:1000px){.page{grid-template-rows:auto 1fr}.header{position:static;align-items:flex-start;padding:12px;flex-wrap:wrap}.main{grid-template-columns:1fr}.grid3{grid-template-columns:1fr 1fr}}
 @media (max-width:560px){.grid2,.grid3,.positions-metrics{grid-template-columns:1fr}.status-strip{justify-content:flex-start}}
 </style>
@@ -59,6 +60,9 @@ button:disabled{opacity:.35;cursor:not-allowed}
       <span class="pill"><span class="dot" id="run-dot"></span><span id="run-label">STOPPED</span></span>
       <span class="pill">K <span id="ws-kline" class="neg">OFF</span></span>
       <span class="pill">T <span id="ws-ticker" class="neg">OFF</span></span>
+      <a class="link-btn" href="/btc.html">BTC</a>
+      <a class="link-btn" href="/gold.html">Gold</a>
+      <a class="link-btn" href="/forex.html">FX</a>
       <a class="link-btn" href="/pnl.html">PNL</a>
       <a class="link-btn" href="/geminibtc.html">Gemini BTC</a>
       <a class="link-btn" href="/allinone.html">All-in-One</a>
@@ -142,7 +146,7 @@ button:disabled{opacity:.35;cursor:not-allowed}
             <div class="metric"><div class="metric-label">Net PNL</div><div class="metric-value" id="pos-net-pnl">$0.00</div></div>
             <div class="metric"><div class="metric-label">LLM Cost</div><div class="metric-value" id="llm-total-cost">$0.0000</div></div>
           </div>
-          <div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>SL</th><th>Trail SL</th><th>TP</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Time</th><th>Session</th></tr></thead><tbody id="positions-open-body"><tr><td colspan="14" class="muted">No open positions.</td></tr></tbody></table></div>
+          <div class="table-wrap"><table class="wide-table"><thead><tr><th>State</th><th>Strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>SL</th><th>Trail SL</th><th>TP</th><th>Margin Used</th><th>Lots</th><th>PNL</th><th>PNL %</th><th>Time</th><th>Session</th><th>Action</th></tr></thead><tbody id="positions-open-body"><tr><td colspan="15" class="muted">No open positions.</td></tr></tbody></table></div>
         </div>
       </section>
       <section class="panel">
@@ -525,7 +529,7 @@ function renderPositions (data = {}) {
   $('positions-bot-pill').textContent = running ? `LLM ${running} LIVE` : 'LLM STOPPED';
   $('positions-updated-at').textContent = `Local data ${new Date().toLocaleTimeString()}`;
   renderLlmTotals();
-  $('positions-open-body').innerHTML = openRows.length ? openRows.map(p => `<tr><td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td><td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${fmtUSD(p.sl)}</td><td>${fmtUSD(p.trailSl)}</td><td>${fmtUSD(p.tp)}</td><td>${fmtUSD(p.marginUsed)}</td><td>${fmtLots(p.lots || p.size || p.qty)}</td><td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td><td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="14" class="muted">No open positions.</td></tr>';
+  $('positions-open-body').innerHTML = openRows.length ? openRows.map(p => `<tr><td>${badge('open','open')}</td><td>${esc(p.strategyName || '--')}</td><td>${badge(p.type,p.type)}</td><td>${fmtUSD(p.entry)}</td><td>${fmtUSD(p.markPrice)}</td><td>${fmtUSD(p.sl)}</td><td>${fmtUSD(p.trailSl)}</td><td>${fmtUSD(p.tp)}</td><td>${fmtUSD(p.marginUsed)}</td><td>${fmtLots(p.lots || p.size || p.qty)}</td><td class="${pnlCls(p.pnl)}">${fmtUSD(p.pnl)}</td><td class="${pnlCls(p.pnlPct)}">${fmtPct(p.pnlPct)}</td><td>${fmtTime(p.entryTime)}</td><td>${esc(p.shortId || '--')}</td><td><button class="danger-btn" type="button" onclick="forceClosePosition('${esc(p.runnerId || '')}')">Force Close</button></td></tr>`).join('') : '<tr><td colspan="15" class="muted">No open positions.</td></tr>';
   $('positions-closed-sub').textContent = `${closedRows.length} closed`;
   $('positions-closed-body').innerHTML = closedRows.length ? closedRows.map(t => `<tr><td>${badge('closed','closed')}</td><td>${esc(t.strategyName || '--')}</td><td>${badge(t.type,t.type)}</td><td>${fmtUSD(t.entry)}</td><td>${fmtUSD(t.exit)}</td><td>${fmtUSD(t.sl)}</td><td>${fmtUSD(t.tp)}</td><td>${fmtUSD(t.marginUsed)}</td><td>${fmtLots(t.lots || t.size || t.qty)}</td><td class="${pnlCls(t.pnl)}">${fmtUSD(t.pnl)}</td><td class="${pnlCls(t.pnlPct)}">${fmtPct(t.pnlPct)}</td><td>${esc(t.reason || '--')}</td><td>${fmtTime(t.exitTime)}</td><td>${esc(t.shortId || '--')}</td></tr>`).join('') : '<tr><td colspan="14" class="muted">No closed positions.</td></tr>';
 }
@@ -534,14 +538,25 @@ async function loadPositions (forced = false) {
   renderPositions(data);
 }
 async function resetAllPaperData () {
-  if (!confirm('Delete all paper positions, trades, and P&L history? This will stop running paper bots and reset all sessions.')) return;
+  if (!confirm('Delete Gemini LLM page positions, trades, and P&L history only? This will stop LLM bots on this page and reset their sessions.')) return;
   try {
-    await api('/api/positions/reset-all', { method:'POST' });
+    await api('/api/positions/reset-scoped', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ runnerPrefix:'llm:' }) });
     await loadStrategies();
     await loadPositions(false);
-    addLog('warn', 'All paper positions, trades, and P&L were deleted.');
+    addLog('warn', 'Gemini LLM page positions, trades, and P&L were deleted.');
   } catch (err) {
-    addLog('error', `Delete all failed: ${err.message}`);
+    addLog('error', `Delete Gemini LLM positions failed: ${err.message}`);
+  }
+}
+
+async function forceClosePosition (runnerId) {
+  if (!runnerId || !confirm('Force close this open position at current mark price?')) return;
+  try {
+    await api('/api/positions/force-close', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ runnerId }) });
+    await loadPositions(true);
+    addLog('warn', 'Position force closed.');
+  } catch (err) {
+    addLog('error', `Force close failed: ${err.message}`);
   }
 }
 async function loadInitial () {

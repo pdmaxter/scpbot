@@ -162,13 +162,13 @@ class ScalpingStrategy extends EventEmitter {
     if (this.position) {
       const p = this.position;
       if (p.type === 'long') {
-        if (low <= p.trailSl)  return this._closePos(Math.max(p.trailSl, open), openTime, 'stop_loss'),  this._state();
-        if (high >= p.tp)      return this._closePos(p.tp, openTime, 'take_profit'), this._state();
+        if (low <= p.trailSl)  { this._closePos(Math.max(p.trailSl, open), openTime, 'stop_loss'); return this._state(); }
+        if (high >= p.tp)      { this._closePos(p.tp, openTime, 'take_profit'); return this._state(); }
         const nt = close - this.atrVal * trailMult;
         if (nt > p.trailSl) p.trailSl = nt;
       } else {
-        if (high >= p.trailSl) return this._closePos(Math.min(p.trailSl, open), openTime, 'stop_loss'),  this._state();
-        if (low  <= p.tp)      return this._closePos(p.tp, openTime, 'take_profit'), this._state();
+        if (high >= p.trailSl) { this._closePos(Math.min(p.trailSl, open), openTime, 'stop_loss'); return this._state(); }
+        if (low  <= p.tp)      { this._closePos(p.tp, openTime, 'take_profit'); return this._state(); }
         const nt = close + this.atrVal * trailMult;
         if (nt < p.trailSl) p.trailSl = nt;
       }
