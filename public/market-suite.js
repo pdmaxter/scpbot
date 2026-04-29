@@ -174,7 +174,7 @@ function renderSelected () {
   $('chart-pos-state').textContent = pos ? `${String(pos.type).toUpperCase()} @ ${fmtPrice(pos.entry)}` : 'Flat';
   $('chart-pnl-state').textContent = `P&L ${fmtUSD(s.stats?.totalPnl || 0)}`;
   renderCandles(baseCandles, false);
-  loadPositions(false).catch(() => {});
+  loadPagePositions(false).catch(() => {});
 }
 
 function selectStrategy (key) {
@@ -237,7 +237,7 @@ async function toggleStrategy (event, key, running) {
   await loadStrategies();
 }
 
-async function loadPositions (flash = false) {
+async function loadPagePositions (flash = false) {
   const data = await api(`/api/positions?runnerPrefix=${encodeURIComponent(`market:${PAGE.page}:`)}`);
   $('positions-updated-at').textContent = `Updated ${fmtTime(Date.now())}`;
   $('positions-bot-pill').textContent = `BOTS ${data.summary?.openCount || 0} OPEN`;
@@ -301,19 +301,19 @@ function renderClosedPositions (rows = []) {
   </tr>`).join('');
 }
 
-async function forceClose (runnerId) {
+async function forceClosePosition (runnerId) {
   await api('/api/positions/force-close', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ runnerId }) });
   addLog('warn', 'Position force-closed.');
-  await loadPositions(false);
+  await loadPagePositions(false);
   await loadStrategies();
 }
 
-async function resetAllPaperData () {
+async function resetPagePaperData () {
   if (!confirm(`Delete ${PAGE.label} page positions, trades, and PNL history only? This will stop ${PAGE.label} bots on this page and reset their sessions.`)) return;
   await api('/api/positions/reset-scoped', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ runnerPrefix:`market:${PAGE.page}:` }) });
   addLog('warn', `${PAGE.label} page positions and PNL reset.`);
   await loadStrategies();
-  await loadPositions(false);
+  await loadPagePositions(false);
 }
 
 function ensureChart () {
@@ -389,7 +389,7 @@ socket.on(`${PAGE.namespace}:runner_event`, payload => {
   if (!payload) return;
   if (payload.status) updateHeaderStatus(payload.status);
   if (payload.key && payload.key === selectedKey && payload.stats) latestStats = payload.stats;
-  if (payload.event === 'position_opened' || payload.event === 'trade_closed' || payload.event === 'status') loadPositions(false).catch(() => {});
+  if (payload.event === 'position_opened' || payload.event === 'trade_closed' || payload.event === 'status') loadPagePositions(false).catch(() => {});
   loadStrategies().catch(() => {});
 });
 socket.on('log', row => {
@@ -404,10 +404,10 @@ async function boot () {
   const settings = await api(`/api/markets/${PAGE.page}/settings`);
   setOptions({ ...settings, symbolOptions: settings.symbolOptions || PAGE.symbolOptions || [] });
   await loadStrategies();
-  await loadPositions(false);
+  await loadPagePositions(false);
   ensureChart();
   if (positionsTimer) clearInterval(positionsTimer);
-  positionsTimer = setInterval(() => loadPositions(false).catch(() => {}), 10000);
+  positionsTimer = setInterval(() => loadPagePositions(false).catch(() => {}), 10000);
 }
 
 window.selectStrategy = selectStrategy;
@@ -418,9 +418,9 @@ window.stopSelected = async () => { try { await stopSelected(); } catch (e) { ad
 window.pauseSelected = async () => { try { await pauseSelected(); } catch (e) { addLog('error', e.message); } };
 window.resumeSelected = async () => { try { await resumeSelected(); } catch (e) { addLog('error', e.message); } };
 window.resetSelected = async () => { try { await resetSelected(); } catch (e) { addLog('error', e.message); } };
-window.forceClose = runnerId => forceClose(runnerId).catch(e => addLog('error', e.message));
-window.loadPositions = flash => loadPositions(flash).catch(e => addLog('error', e.message));
-window.resetAllPaperData = () => resetAllPaperData().catch(e => addLog('error', e.message));
+window.forceClose = runnerId => forceClosePosition(runnerId).catch(e => addLog('error', e.message));
+window.loadPositions = flash => loadPagePositions(flash).catch(e => addLog('error', e.message));
+window.resetAllPaperData = () => resetPagePaperData().catch(e => addLog('error', e.message));
 window.clearLog = clearLog;
 
 boot().catch(error => addLog('error', error.message));
