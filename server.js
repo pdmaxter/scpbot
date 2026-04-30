@@ -1996,6 +1996,12 @@ function calcUnrealizedPnl (position, markPrice) {
   };
 }
 
+function moneyLabel (value) {
+  if (value === null || value === undefined || value === '') return '--';
+  const n = Number(value);
+  return Number.isFinite(n) ? `$${n.toFixed(2)}` : '--';
+}
+
 function instrumentMetaForRunnerId (runnerId = '', runner = null) {
   const id = String(runnerId || '');
   const strategySymbol = String(runner?.strategy?.symbol || '').trim();
