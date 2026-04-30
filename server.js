@@ -24,6 +24,7 @@ const { GeminiLlmStrategy, LLM_STRATEGY_DEFINITIONS, DEFAULT_MODEL, fetchGeminiM
 const { GeminiBtcStrategy, GEMINI_BTC_DEFAULTS } = require('./strategies/gemini_btc');
 const { UTBotStrategy }                      = require('./strategies/ut_bot');
 const { MarketSuiteStrategy, MARKET_SUITE_DEFINITIONS, defaultSymbolForMarket } = require('./strategies/market_suite');
+const { Btc10ConfluenceStrategy, BTC_10_CONFLUENCE_DEFINITIONS } = require('./strategies/btc_10_confluence');
 
 const SYMBOL_REST = 'BTCUSDT';
 const INTERVAL_REST = '5m';
@@ -44,6 +45,15 @@ const MARKET_PAGE_CONFIGS = {
     provider: 'binance',
     symbol: 'BTCUSDT',
     route: '/btc.html',
+  },
+  btc10: {
+    page: 'btc10',
+    title: 'BTC 10 Strategies Confluence Bot',
+    namespace: 'btc10page',
+    label: 'BTC 10',
+    provider: 'binance',
+    symbol: 'BTCUSDT',
+    route: '/btc10.html',
   },
   gold: {
     page: 'gold',
@@ -73,7 +83,13 @@ const MARKET_PAGE_CONFIGS = {
     ],
   },
 };
-const MARKET_PAGE_ORDER = ['btc', 'gold', 'forex'];
+const MARKET_PAGE_DEFINITION_MAP = {
+  btc: MARKET_SUITE_DEFINITIONS,
+  btc10: BTC_10_CONFLUENCE_DEFINITIONS,
+  gold: MARKET_SUITE_DEFINITIONS,
+  forex: MARKET_SUITE_DEFINITIONS,
+};
+const MARKET_PAGE_ORDER = ['btc', 'btc10', 'gold', 'forex'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Auth config  (set via .env)
@@ -566,11 +582,7 @@ const haRunner       = new StrategyRunner('heikenashi',  new HeikenAshiSupertren
 const pineRunners    = new Map(); // scriptId -> StrategyRunner
 const allInOneRunners = new Map(); // strategyKey -> StrategyRunner
 const llmRunners = new Map(); // strategyKey -> StrategyRunner
-const marketSuiteRunners = {
-  btc: new Map(),
-  gold: new Map(),
-  forex: new Map(),
-};
+const marketSuiteRunners = Object.fromEntries(MARKET_PAGE_ORDER.map(page => [page, new Map()]));
 const marketFeedManagers = Object.fromEntries(
   MARKET_PAGE_ORDER.map(page => {
     const cfg = MARKET_PAGE_CONFIGS[page];
@@ -1201,6 +1213,10 @@ function marketRunnerId (page, key) {
   return `market:${page}:${key}`;
 }
 
+function marketPageDefinitions (page) {
+  return MARKET_PAGE_DEFINITION_MAP[page] || MARKET_SUITE_DEFINITIONS;
+}
+
 function marketSuiteDefaultConfig (page, def) {
   return {
     page,
@@ -1217,8 +1233,7 @@ function marketSuiteDefaultConfig (page, def) {
 }
 
 async function ensureMarketSuiteConfigs (page) {
-  const cfg = marketPageConfig(page);
-  await Promise.all(MARKET_SUITE_DEFINITIONS.map(def => {
+  await Promise.all(marketPageDefinitions(page).map(def => {
     const defaults = marketSuiteDefaultConfig(page, def);
     delete defaults.name;
     return MarketSuiteStrategyConfig.updateOne(
@@ -1275,7 +1290,7 @@ function applyMarketSuiteRuntimeOptions (doc, body = {}) {
 async function listMarketSuiteDetailed (page) {
   await ensureMarketSuiteConfigs(page);
   const docs = await MarketSuiteStrategyConfig.find({ page }).sort({ createdAt: 1 }).lean();
-  const order = new Map(MARKET_SUITE_DEFINITIONS.map((def, index) => [def.key, index]));
+  const order = new Map(marketPageDefinitions(page).map((def, index) => [def.key, index]));
   docs.sort((a, b) => (order.get(a.key) ?? 999) - (order.get(b.key) ?? 999));
   return Promise.all(docs.map(doc => marketSuiteRunnerSnapshot(doc)));
 }
@@ -1381,6 +1396,12 @@ function hookMarketSuiteRunnerEvents (runner, page, key) {
   };
 }
 
+function createMarketPageStrategy (doc) {
+  const options = marketSuiteStrategyOptions(doc);
+  if (doc.page === 'btc10') return new Btc10ConfluenceStrategy(options);
+  return new MarketSuiteStrategy(options);
+}
+
 function ensureMarketSuiteRunner (doc) {
   const page = doc.page;
   const key = doc.key;
@@ -1390,7 +1411,7 @@ function ensureMarketSuiteRunner (doc) {
   if (!runner) {
     runner = new StrategyRunner(
       marketRunnerId(page, key),
-      new MarketSuiteStrategy(marketSuiteStrategyOptions(doc)),
+      createMarketPageStrategy(doc),
       io,
       {
         sessionStrategyType: marketRunnerId(page, key),
@@ -1881,7 +1902,7 @@ function strategyNameForSession (session, pineMap) {
   }
   if (type.startsWith?.('market:')) {
     const [, page, key] = type.split(':');
-    const def = MARKET_SUITE_DEFINITIONS.find(item => item.key === key);
+    const def = marketPageDefinitions(page).find(item => item.key === key);
     return def ? `${marketPageConfig(page).label}: ${def.name}` : type;
   }
   return STRATEGY_LABELS[type] || type;
@@ -3540,7 +3561,7 @@ async function bootstrap () {
     console.log(`  🗄️   MongoDB: ${process.env.MONGO_URI || 'mongodb://localhost:27017/btc_scalping_bot'}`);
     console.log('  🧾  Position source: local MongoDB only');
     console.log('  📝  Mode: PAPER TRADING  |  Strategies run 24/7 on server');
-    console.log('  🌍  New pages: /btc.html  /gold.html  /forex.html');
+    console.log('  🌍  New pages: /btc.html  /btc10.html  /gold.html  /forex.html');
     console.log('═'.repeat(62) + '\n');
   });
 }

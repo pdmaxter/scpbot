@@ -1,0 +1,76 @@
+//@version=5
+strategy("BTC 10-Strategy Confluence", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=20)
+
+// --- PARAMETERS (Fixed input.int) ---
+threshold = input.int(6, "Buy/Sell Signal Threshold (1-10)", minval=1, maxval=10)
+tp_pct    = input.float(3.0, "Take Profit %") / 100
+sl_pct    = input.float(1.5, "Stop Loss %") / 100
+tsl_pct   = input.float(0.5, "Trailing Stop %") / 100
+
+// --- INDICATORS ---
+// 1. EMA Cross
+ema9 = ta.ema(close, 9), ema21 = ta.ema(close, 21)
+s1 = ema9 > ema21 ? 1 : -1
+
+// 2. VWAP
+vwapVal = ta.vwap(close)
+s2 = close > vwapVal ? 1 : -1
+
+// 3. RSI
+rsi = ta.rsi(close, 14)
+s3 = rsi < 40 ? 1 : (rsi > 60 ? -1 : 0)
+
+// 4. MACD
+[macdLine, signalLine, _] = ta.macd(close, 12, 26, 9)
+s4 = macdLine > signalLine ? 1 : -1
+
+// 5. Bollinger Bands
+[bbMid, bbUpper, bbLower] = ta.bb(close, 20, 2)
+s5 = close < bbLower ? 1 : (close > bbUpper ? -1 : 0)
+
+// 6. ADX
+[diplus, diminus, adx] = ta.dmi(14, 14)
+s6 = (adx > 25 and diplus > diminus) ? 1 : (adx > 25 and diminus > diplus ? -1 : 0)
+
+// 7. Stochastic
+k = ta.sma(ta.stoch(close, high, low, 14), 3)
+s7 = k < 20 ? 1 : (k > 80 ? -1 : 0)
+
+// 8. MFI
+mfi = ta.mfi(close, 14)
+s8 = mfi < 20 ? 1 : (mfi > 80 ? -1 : 0)
+
+// 9. SuperTrend
+[st, dir] = ta.supertrend(3, 10)
+s9 = dir < 0 ? 1 : -1
+
+// 10. ATR Filter
+atr = ta.atr(14)
+s10 = close > ta.sma(close, 20) + (atr * 0.5) ? 1 : -1
+
+// --- TOTAL CONFLUENCE SCORE ---
+totalScore = s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9 + s10
+
+// --- EXECUTION ---
+longCond  = totalScore >= threshold
+shortCond = totalScore <= -threshold
+
+if longCond
+    strategy.entry("Long", strategy.long)
+if shortCond
+    strategy.entry("Short", strategy.short)
+
+// --- TRAILING STOP ENGINE ---
+var float tsl_price = na
+
+if strategy.position_size > 0
+    float stop_init = strategy.position_avg_price * (1 - sl_pct)
+    tsl_price := na(tsl_price) ? stop_init : math.max(tsl_price, high * (1 - tsl_pct))
+    strategy.exit("Exit Long", "Long", limit=strategy.position_avg_price * (1 + tp_pct), stop=tsl_price)
+
+else if strategy.position_size < 0
+    float stop_init = strategy.position_avg_price * (1 + sl_pct)
+    tsl_price := na(tsl_price) ? stop_init : math.min(tsl_price, low * (1 + tsl_pct))
+    strategy.exit("Exit Short", "Short", limit=strategy.position_avg_price * (1 - tp_pct), stop=tsl_price)
+else
+    tsl_price := na
