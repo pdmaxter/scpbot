@@ -557,7 +557,8 @@ function requireAuth (req, res, next) {
 
 app.use(requireAuth);
 app.get(['/', '/index.html'], (_req, res) => res.redirect('/pine.html'));
-app.get('/positions.html', (_req, res) => res.redirect('/pnl.html'));
+app.get('/pnl.html', (_req, res) => res.redirect('/performance.html'));
+app.get('/positions.html', (_req, res) => res.redirect('/performance.html'));
 app.get('/utbot.html', (_req, res) => res.redirect('/pine.html'));
 app.get('/mt5.html', (_req, res) => res.redirect('/pine.html'));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -1995,6 +1996,371 @@ function calcUnrealizedPnl (position, markPrice) {
   };
 }
 
+function instrumentMetaForRunnerId (runnerId = '', runner = null) {
+  const id = String(runnerId || '');
+  const strategySymbol = String(runner?.strategy?.symbol || '').trim();
+  if (id.startsWith('market:')) {
+    const page = marketPageForRunnerId(id);
+    const cfg = marketPageConfig(page);
+    const symbol = strategySymbol || cfg.symbol;
+    if (page === 'gold') return { instrumentKey: symbol, instrumentLabel: symbol, instrumentCategory: 'Gold', page, route: cfg.route };
+    if (page === 'forex') return { instrumentKey: symbol, instrumentLabel: symbol, instrumentCategory: 'Forex', page, route: cfg.route };
+    return { instrumentKey: symbol || 'BTCUSDT', instrumentLabel: symbol || 'BTCUSDT', instrumentCategory: 'BTC', page, route: cfg.route };
+  }
+  if (id === 'geminibtc') return { instrumentKey: 'BTCUSDT', instrumentLabel: 'BTCUSDT', instrumentCategory: 'BTC', page: 'geminibtc', route: '/geminibtc.html' };
+  if (id === 'utbot') return { instrumentKey: 'BTCUSDT', instrumentLabel: 'BTCUSDT', instrumentCategory: 'BTC', page: 'utbot', route: '/pine.html' };
+  if (id.startsWith('allinone:')) return { instrumentKey: 'BTCUSDT', instrumentLabel: 'BTCUSDT', instrumentCategory: 'BTC', page: 'allinone', route: '/allinone.html' };
+  if (id.startsWith('llm:')) return { instrumentKey: 'BTCUSDT', instrumentLabel: 'BTCUSDT', instrumentCategory: 'BTC', page: 'llm', route: '/llm.html' };
+  if (id.startsWith('pine:')) return { instrumentKey: 'BTCUSDT', instrumentLabel: 'BTCUSDT', instrumentCategory: 'BTC', page: 'pine', route: '/pine.html' };
+  return { instrumentKey: 'BTCUSDT', instrumentLabel: 'BTCUSDT', instrumentCategory: 'BTC', page: 'core', route: '/btc.html' };
+}
+
+function performanceConfidence (tradeCount = 0) {
+  if (tradeCount >= 12) return 'high';
+  if (tradeCount >= 5) return 'medium';
+  return 'low';
+}
+
+function performanceRecommendationFor (row) {
+  const tradeCount = Number(row.tradeCount || 0);
+  const winRate = Number(row.winRate || 0);
+  const netPnl = Number(row.netPnl || 0);
+  const realizedPnl = Number(row.realizedPnl || 0);
+  const openPnl = Number(row.openPnl || 0);
+  const recentNetPnl = Number(row.recentNetPnl || 0);
+  const lossStreak = Number(row.lossStreak || 0);
+  const openCount = Number(row.openCount || 0);
+
+  let score = 50;
+  score += Math.max(-18, Math.min(18, (winRate - 50) * 0.8));
+  score += realizedPnl > 0 ? 12 : (realizedPnl < 0 ? -12 : 0);
+  score += netPnl > 0 ? 8 : (netPnl < 0 ? -8 : 0);
+  score += recentNetPnl > 0 ? 6 : (recentNetPnl < 0 ? -6 : 0);
+  score += openPnl > 0 ? 4 : (openPnl < 0 ? -4 : 0);
+  if (lossStreak >= 3) score -= 14;
+  else if (lossStreak === 2) score -= 8;
+  if (tradeCount < 3) score -= 6;
+  if (openCount > 0) score += 2;
+  score = Math.max(0, Math.min(100, score));
+
+  let action = 'review';
+  let label = 'Review';
+  let reason = 'Needs more data or mixed recent signals.';
+  if (tradeCount >= 5 && score >= 60 && realizedPnl >= 0 && recentNetPnl >= 0) {
+    action = 'run';
+    label = 'Run';
+    reason = 'Profitable history with stable recent position outcomes.';
+  } else if (tradeCount >= 5 && score <= 40 && realizedPnl < 0 && (lossStreak >= 2 || recentNetPnl < 0)) {
+    action = 'stop';
+    label = 'Stop';
+    reason = 'Weak closed-position performance and negative recent follow-through.';
+  } else if (!tradeCount && !openCount) {
+    action = 'review';
+    label = 'Review';
+    reason = 'No position history yet, so keep it off until it has enough sample data.';
+  }
+
+  return { action, label, score, confidence: performanceConfidence(tradeCount), reason };
+}
+
+function performanceAnalysisFor (row) {
+  const tradeText = row.tradeCount
+    ? `${row.tradeCount} closed trades with ${Number(row.winRate || 0).toFixed(1)}% win rate`
+    : (row.openCount ? `${row.openCount} open position${row.openCount === 1 ? '' : 's'} and no closed-trade sample yet` : 'No open or closed position sample yet');
+  const pnlText = `Realized ${moneyLabel(row.realizedPnl)} | Open ${moneyLabel(row.openPnl)} | Net ${moneyLabel(row.netPnl)}`;
+  const recentText = row.tradeCount
+    ? `Recent 5-trade P&L ${moneyLabel(row.recentNetPnl)}${row.lossStreak ? ` | Loss streak ${row.lossStreak}` : ''}`
+    : 'Recent closed-position trend unavailable';
+  const lastTradeText = row.lastTradeTime ? `Last exit ${new Date(row.lastTradeTime).toLocaleString('en-US', { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' })}` : 'No recorded exit yet';
+  return {
+    headline: `${tradeText}. ${pnlText}.`,
+    detail: `${recentText}. ${lastTradeText}. Margin in use ${moneyLabel(row.marginUsed)}.`,
+  };
+}
+
+async function buildPerformanceOverview (query = {}) {
+  const fromMs = query.fromDate ? Date.parse(query.fromDate) : null;
+  const toMs = query.toDate ? Date.parse(query.toDate) : null;
+  const limit = Math.min(Math.max(Number(query.limit) || 400, 1), 1000);
+  const tradeQuery = {};
+  if (Number.isFinite(fromMs) || Number.isFinite(toMs)) {
+    tradeQuery.exitTime = {};
+    if (Number.isFinite(fromMs)) tradeQuery.exitTime.$gte = fromMs;
+    if (Number.isFinite(toMs)) tradeQuery.exitTime.$lte = toMs;
+  }
+
+  const [openDocs, tradeDocs] = await Promise.all([
+    Position.find().sort({ updatedAt: -1 }).lean(),
+    Trade.find(tradeQuery).sort({ exitTime: -1 }).limit(limit).lean(),
+  ]);
+
+  const sessionIds = [...new Set(
+    [...openDocs, ...tradeDocs]
+      .map(item => idString(item.sessionId))
+      .filter(Boolean)
+  )];
+  const sessions = sessionIds.length
+    ? await Session.find({ _id: { $in: sessionIds } }).lean()
+    : [];
+  const sessionMap = new Map(sessions.map(s => [idString(s._id), s]));
+  const pineIds = [...new Set(sessions.map(s => idString(s.pineScriptId)).filter(Boolean))];
+  const pineDocs = pineIds.length
+    ? await PineScriptConfig.find({ _id: { $in: pineIds } }).lean()
+    : [];
+  const pineMap = new Map(pineDocs.map(p => [idString(p._id), p]));
+  const runners = allKnownRunners();
+  const runnerMap = new Map(runners.map(r => [r.id, r]));
+  const runningIds = new Set(runners.filter(r => r.running).map(r => r.id));
+
+  const open = openDocs.map(p => {
+    const session = sessionMap.get(idString(p.sessionId));
+    const runnerId = sessionRunnerId(session);
+    const feed = managerForRunnerId(runnerId);
+    const lastCandle = feed?.latestCandles?.[feed.latestCandles.length - 1];
+    const markPrice = Number(feed?.currentTicker?.price || lastCandle?.close || null);
+    const pnl = calcUnrealizedPnl(p, markPrice);
+    return {
+      id: idString(p._id),
+      sessionId: idString(p.sessionId),
+      shortId: idString(p.sessionId)?.slice(-6).toUpperCase() || null,
+      strategyType: session?.strategyType || null,
+      strategyName: strategyNameForSession(session, pineMap),
+      runnerId,
+      running: runningIds.has(runnerId),
+      type: p.type,
+      entry: p.entry,
+      markPrice,
+      qty: p.qty,
+      lots: normalizedLots(p),
+      marginUsed: normalizedMarginUsed(p, session),
+      leverage: Number(p.leverage) || 1,
+      pnl: pnl.pnl,
+      pnlPct: pnl.pnlPct,
+      liquidationPrice: p.liquidationPrice ?? null,
+      entryTime: p.entryTime,
+    };
+  });
+
+  const closed = tradeDocs.map(t => {
+    const session = sessionMap.get(idString(t.sessionId));
+    const runnerId = sessionRunnerId(session);
+    return {
+      id: idString(t._id),
+      sessionId: idString(t.sessionId),
+      shortId: idString(t.sessionId)?.slice(-6).toUpperCase() || null,
+      strategyType: session?.strategyType || null,
+      strategyName: strategyNameForSession(session, pineMap),
+      runnerId,
+      running: runningIds.has(runnerId),
+      type: t.type,
+      entry: t.entry,
+      exit: t.exit,
+      qty: t.qty,
+      lots: normalizedLots(t),
+      marginUsed: normalizedMarginUsed(t, session),
+      leverage: Number(t.leverage) || 1,
+      pnl: t.pnl,
+      pnlPct: t.pnlPct,
+      reason: t.reason,
+      exitTime: t.exitTime,
+      entryTime: t.entryTime,
+    };
+  });
+
+  const strategyMap = new Map();
+  function ensureStrategy (seed = {}) {
+    const key = seed.runnerId || seed.strategyName || 'unknown';
+    const existing = strategyMap.get(key);
+    if (existing) {
+      if (seed.running) existing.running = true;
+      if (seed.route && !existing.route) existing.route = seed.route;
+      if (seed.strategyName && existing.strategyName === 'Unknown Strategy') existing.strategyName = seed.strategyName;
+      return existing;
+    }
+    const instrumentMeta = instrumentMetaForRunnerId(seed.runnerId || '', seed.runner || null);
+    const base = {
+      runnerId: seed.runnerId || null,
+      strategyName: seed.strategyName || 'Unknown Strategy',
+      running: Boolean(seed.running),
+      route: seed.route || instrumentMeta.route || null,
+      instrumentKey: instrumentMeta.instrumentKey,
+      instrumentLabel: instrumentMeta.instrumentLabel,
+      instrumentCategory: instrumentMeta.instrumentCategory,
+      openCount: 0,
+      tradeCount: 0,
+      winCount: 0,
+      lossCount: 0,
+      openPnl: 0,
+      realizedPnl: 0,
+      netPnl: 0,
+      marginUsed: 0,
+      lastTradeTime: null,
+      recentClosed: [],
+      recentNetPnl: 0,
+      lossStreak: 0,
+    };
+    strategyMap.set(key, base);
+    return base;
+  }
+
+  for (const runner of runners) {
+    ensureStrategy({
+      runnerId: runner.id,
+      strategyName: runner.displayName || runner.id,
+      running: runner.running,
+      route: instrumentMetaForRunnerId(runner.id, runner).route,
+      runner,
+    });
+  }
+
+  for (const row of open) {
+    const item = ensureStrategy(row);
+    item.running = item.running || Boolean(row.running);
+    item.openCount += 1;
+    item.openPnl += Number.isFinite(row.pnl) ? row.pnl : 0;
+    item.marginUsed += Number(row.marginUsed) || 0;
+  }
+
+  for (const row of closed) {
+    const item = ensureStrategy(row);
+    item.running = item.running || Boolean(row.running);
+    item.tradeCount += 1;
+    item.realizedPnl += Number(row.pnl) || 0;
+    item.winCount += row.pnl > 0 ? 1 : 0;
+    item.lossCount += row.pnl <= 0 ? 1 : 0;
+    item.lastTradeTime = Math.max(item.lastTradeTime || 0, Number(row.exitTime) || 0) || item.lastTradeTime;
+    if (item.recentClosed.length < 5) item.recentClosed.push(row);
+  }
+
+  const strategyRows = [...strategyMap.values()]
+    .map(item => {
+      item.netPnl = item.realizedPnl + item.openPnl;
+      item.winRate = item.tradeCount ? item.winCount / item.tradeCount * 100 : 0;
+      item.recentNetPnl = item.recentClosed.reduce((sum, trade) => sum + (Number(trade.pnl) || 0), 0);
+      item.lossStreak = 0;
+      for (const trade of item.recentClosed) {
+        if ((Number(trade.pnl) || 0) <= 0) item.lossStreak += 1;
+        else break;
+      }
+      item.recommendation = performanceRecommendationFor(item);
+      item.analysis = performanceAnalysisFor(item);
+      return item;
+    })
+    .sort((a, b) => {
+      const order = { stop: 0, review: 1, run: 2 };
+      if (order[a.recommendation.action] !== order[b.recommendation.action]) {
+        return order[a.recommendation.action] - order[b.recommendation.action];
+      }
+      if (a.running !== b.running) return a.running ? -1 : 1;
+      return (b.netPnl || 0) - (a.netPnl || 0);
+    });
+
+  const instrumentMap = new Map();
+  for (const row of strategyRows) {
+    const key = row.instrumentKey || 'Unknown';
+    if (!instrumentMap.has(key)) {
+      instrumentMap.set(key, {
+        instrumentKey: key,
+        instrumentLabel: row.instrumentLabel || key,
+        instrumentCategory: row.instrumentCategory || 'Other',
+        strategyCount: 0,
+        runningCount: 0,
+        runCount: 0,
+        reviewCount: 0,
+        stopCount: 0,
+        openPnl: 0,
+        realizedPnl: 0,
+        netPnl: 0,
+      });
+    }
+    const item = instrumentMap.get(key);
+    item.strategyCount += 1;
+    item.runningCount += row.running ? 1 : 0;
+    item.runCount += row.recommendation.action === 'run' ? 1 : 0;
+    item.reviewCount += row.recommendation.action === 'review' ? 1 : 0;
+    item.stopCount += row.recommendation.action === 'stop' ? 1 : 0;
+    item.openPnl += Number(row.openPnl) || 0;
+    item.realizedPnl += Number(row.realizedPnl) || 0;
+    item.netPnl += Number(row.netPnl) || 0;
+  }
+
+  const instrumentRows = [...instrumentMap.values()].sort((a, b) => {
+    if (a.instrumentCategory !== b.instrumentCategory) return String(a.instrumentCategory).localeCompare(String(b.instrumentCategory));
+    return String(a.instrumentLabel).localeCompare(String(b.instrumentLabel));
+  });
+
+  const dailyMap = new Map();
+  for (const row of closed) {
+    const key = utcDayKey(row.exitTime);
+    if (!key) continue;
+    if (!dailyMap.has(key)) {
+      dailyMap.set(key, {
+        date: key,
+        realizedPnl: 0,
+        tradeCount: 0,
+        winCount: 0,
+        lossCount: 0,
+        strategies: new Set(),
+      });
+    }
+    const day = dailyMap.get(key);
+    day.realizedPnl += Number(row.pnl) || 0;
+    day.tradeCount += 1;
+    day.winCount += row.pnl > 0 ? 1 : 0;
+    day.lossCount += row.pnl <= 0 ? 1 : 0;
+    if (row.strategyName) day.strategies.add(row.strategyName);
+  }
+
+  const dailyRows = [...dailyMap.values()]
+    .map(day => ({
+      date: day.date,
+      realizedPnl: day.realizedPnl,
+      tradeCount: day.tradeCount,
+      winCount: day.winCount,
+      lossCount: day.lossCount,
+      strategyCount: day.strategies.size,
+    }))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+  const openPnl = open.reduce((sum, row) => sum + (Number.isFinite(row.pnl) ? row.pnl : 0), 0);
+  const realizedPnl = closed.reduce((sum, row) => sum + (Number(row.pnl) || 0), 0);
+  const recommendations = {
+    run: strategyRows.filter(row => row.recommendation.action === 'run').map(row => row.runnerId).filter(Boolean),
+    review: strategyRows.filter(row => row.recommendation.action === 'review').map(row => row.runnerId).filter(Boolean),
+    stop: strategyRows.filter(row => row.recommendation.action === 'stop').map(row => row.runnerId).filter(Boolean),
+  };
+
+  return {
+    generatedAt: new Date().toISOString(),
+    markPrice: null,
+    dateRange: {
+      fromDate: Number.isFinite(fromMs) ? new Date(fromMs).toISOString().slice(0, 10) : null,
+      toDate: Number.isFinite(toMs) ? new Date(toMs).toISOString().slice(0, 10) : null,
+    },
+    summary: {
+      strategyCount: strategyRows.length,
+      runningStrategies: strategyRows.filter(row => row.running).length,
+      shouldRunCount: strategyRows.filter(row => row.recommendation.action === 'run').length,
+      shouldReviewCount: strategyRows.filter(row => row.recommendation.action === 'review').length,
+      shouldStopCount: strategyRows.filter(row => row.recommendation.action === 'stop').length,
+      openCount: open.length,
+      closedCount: closed.length,
+      openPnl,
+      realizedPnl,
+      netPnl: openPnl + realizedPnl,
+      winningDays: dailyRows.filter(day => day.realizedPnl > 0).length,
+      losingDays: dailyRows.filter(day => day.realizedPnl < 0).length,
+      instrumentCount: instrumentRows.length,
+    },
+    recommendations,
+    instrumentRows,
+    strategyRows,
+    dailyRows,
+    open,
+    closed,
+  };
+}
+
 function normalizedLots (row) {
   const explicit = Number(row?.lotSize);
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
@@ -2327,209 +2693,13 @@ app.get('/api/positions', async (req, res) => {
 
 app.get('/api/pnl/overview', async (req, res) => {
   try {
-    const fromMs = req.query.fromDate ? Date.parse(req.query.fromDate) : null;
-    const toMs = req.query.toDate ? Date.parse(req.query.toDate) : null;
-    const limit = Math.min(Math.max(Number(req.query.limit) || 400, 1), 1000);
-    const tradeQuery = {};
-    if (Number.isFinite(fromMs) || Number.isFinite(toMs)) {
-      tradeQuery.exitTime = {};
-      if (Number.isFinite(fromMs)) tradeQuery.exitTime.$gte = fromMs;
-      if (Number.isFinite(toMs)) tradeQuery.exitTime.$lte = toMs;
-    }
+    res.json(await buildPerformanceOverview(req.query || {}));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-    const [openDocs, tradeDocs] = await Promise.all([
-      Position.find().sort({ updatedAt: -1 }).lean(),
-      Trade.find(tradeQuery).sort({ exitTime: -1 }).limit(limit).lean(),
-    ]);
-
-    const sessionIds = [...new Set(
-      [...openDocs, ...tradeDocs]
-        .map(item => idString(item.sessionId))
-        .filter(Boolean)
-    )];
-    const sessions = sessionIds.length
-      ? await Session.find({ _id: { $in: sessionIds } }).lean()
-      : [];
-    const sessionMap = new Map(sessions.map(s => [idString(s._id), s]));
-    const pineIds = [...new Set(sessions.map(s => idString(s.pineScriptId)).filter(Boolean))];
-    const pineDocs = pineIds.length
-      ? await PineScriptConfig.find({ _id: { $in: pineIds } }).lean()
-      : [];
-    const pineMap = new Map(pineDocs.map(p => [idString(p._id), p]));
-    const runningIds = new Set(
-      Object.values(manager.runners || {})
-        .filter(r => r.running)
-        .map(r => r.id)
-    );
-    for (const page of MARKET_PAGE_ORDER) {
-      for (const runner of marketSuiteRunners[page].values()) {
-        if (runner.running) runningIds.add(runner.id);
-      }
-    }
-
-    const open = openDocs.map(p => {
-      const session = sessionMap.get(idString(p.sessionId));
-      const runnerId = sessionRunnerId(session);
-      const feed = managerForRunnerId(runnerId);
-      const lastCandle = feed?.latestCandles?.[feed.latestCandles.length - 1];
-      const markPrice = Number(feed?.currentTicker?.price || lastCandle?.close || null);
-      const pnl = calcUnrealizedPnl(p, markPrice);
-      return {
-        id: idString(p._id),
-        sessionId: idString(p.sessionId),
-        shortId: idString(p.sessionId)?.slice(-6).toUpperCase() || null,
-        strategyType: session?.strategyType || null,
-        strategyName: strategyNameForSession(session, pineMap),
-        runnerId,
-        running: runningIds.has(runnerId),
-        type: p.type,
-        entry: p.entry,
-        markPrice,
-        qty: p.qty,
-        lots: normalizedLots(p),
-        marginUsed: normalizedMarginUsed(p, session),
-        leverage: Number(p.leverage) || 1,
-        pnl: pnl.pnl,
-        pnlPct: pnl.pnlPct,
-        liquidationPrice: p.liquidationPrice ?? null,
-        entryTime: p.entryTime,
-      };
-    });
-
-    const closed = tradeDocs.map(t => {
-      const session = sessionMap.get(idString(t.sessionId));
-      const runnerId = sessionRunnerId(session);
-      return {
-        id: idString(t._id),
-        sessionId: idString(t.sessionId),
-        shortId: idString(t.sessionId)?.slice(-6).toUpperCase() || null,
-        strategyType: session?.strategyType || null,
-        strategyName: strategyNameForSession(session, pineMap),
-        runnerId,
-        running: runningIds.has(runnerId),
-        type: t.type,
-        entry: t.entry,
-        exit: t.exit,
-        qty: t.qty,
-        lots: normalizedLots(t),
-        marginUsed: normalizedMarginUsed(t, session),
-        leverage: Number(t.leverage) || 1,
-        pnl: t.pnl,
-        pnlPct: t.pnlPct,
-        reason: t.reason,
-        exitTime: t.exitTime,
-        entryTime: t.entryTime,
-      };
-    });
-
-    const strategyMap = new Map();
-    const ensureStrategy = (row) => {
-      const key = row.runnerId || row.strategyName || 'unknown';
-      if (!strategyMap.has(key)) {
-        strategyMap.set(key, {
-          runnerId: row.runnerId || null,
-          strategyName: row.strategyName || 'Unknown Strategy',
-          running: Boolean(row.running),
-          openCount: 0,
-          tradeCount: 0,
-          winCount: 0,
-          lossCount: 0,
-          openPnl: 0,
-          realizedPnl: 0,
-          netPnl: 0,
-          marginUsed: 0,
-          lastTradeTime: null,
-        });
-      }
-      const item = strategyMap.get(key);
-      item.running = item.running || Boolean(row.running);
-      return item;
-    };
-
-    for (const row of open) {
-      const item = ensureStrategy(row);
-      item.openCount += 1;
-      item.openPnl += Number.isFinite(row.pnl) ? row.pnl : 0;
-      item.marginUsed += Number(row.marginUsed) || 0;
-    }
-
-    for (const row of closed) {
-      const item = ensureStrategy(row);
-      item.tradeCount += 1;
-      item.realizedPnl += Number(row.pnl) || 0;
-      item.winCount += row.pnl > 0 ? 1 : 0;
-      item.lossCount += row.pnl <= 0 ? 1 : 0;
-      item.lastTradeTime = Math.max(item.lastTradeTime || 0, Number(row.exitTime) || 0) || item.lastTradeTime;
-    }
-
-    const strategyRows = [...strategyMap.values()]
-      .map(item => ({
-        ...item,
-        winRate: item.tradeCount ? item.winCount / item.tradeCount * 100 : 0,
-        netPnl: item.realizedPnl + item.openPnl,
-      }))
-      .sort((a, b) => {
-        if (a.running !== b.running) return a.running ? -1 : 1;
-        return (b.netPnl || 0) - (a.netPnl || 0);
-      });
-
-    const dailyMap = new Map();
-    for (const row of closed) {
-      const key = utcDayKey(row.exitTime);
-      if (!key) continue;
-      if (!dailyMap.has(key)) {
-        dailyMap.set(key, {
-          date: key,
-          realizedPnl: 0,
-          tradeCount: 0,
-          winCount: 0,
-          lossCount: 0,
-          strategies: new Set(),
-        });
-      }
-      const day = dailyMap.get(key);
-      day.realizedPnl += Number(row.pnl) || 0;
-      day.tradeCount += 1;
-      day.winCount += row.pnl > 0 ? 1 : 0;
-      day.lossCount += row.pnl <= 0 ? 1 : 0;
-      if (row.strategyName) day.strategies.add(row.strategyName);
-    }
-
-    const dailyRows = [...dailyMap.values()]
-      .map(day => ({
-        date: day.date,
-        realizedPnl: day.realizedPnl,
-        tradeCount: day.tradeCount,
-        winCount: day.winCount,
-        lossCount: day.lossCount,
-        strategyCount: day.strategies.size,
-      }))
-      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
-
-    const openPnl = open.reduce((sum, row) => sum + (Number.isFinite(row.pnl) ? row.pnl : 0), 0);
-    const realizedPnl = closed.reduce((sum, row) => sum + (Number(row.pnl) || 0), 0);
-
-    res.json({
-      markPrice: null,
-      dateRange: {
-        fromDate: Number.isFinite(fromMs) ? new Date(fromMs).toISOString().slice(0, 10) : null,
-        toDate: Number.isFinite(toMs) ? new Date(toMs).toISOString().slice(0, 10) : null,
-      },
-      summary: {
-        runningStrategies: strategyRows.filter(row => row.running).length,
-        openCount: open.length,
-        closedCount: closed.length,
-        openPnl,
-        realizedPnl,
-        netPnl: openPnl + realizedPnl,
-        winningDays: dailyRows.filter(day => day.realizedPnl > 0).length,
-        losingDays: dailyRows.filter(day => day.realizedPnl < 0).length,
-      },
-      strategyRows,
-      dailyRows,
-      open,
-      closed,
-    });
+app.get('/api/performance/overview', async (req, res) => {
+  try {
+    res.json(await buildPerformanceOverview(req.query || {}));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

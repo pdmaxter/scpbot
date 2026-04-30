@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strategy Performance</title>
+<style>
+:root{--bg:#0b1220;--panel:#111827;--panel2:#0f172a;--line:#253045;--text:#e5edf7;--muted:#93a4bb;--green:#00e676;--red:#ff5c74;--blue:#58a6ff;--yellow:#ffd740;--orange:#ffb454;--font:ui-monospace,SFMono-Regular,Menlo,Consolas,'Courier New',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
+.page{min-height:100vh;display:grid;grid-template-rows:56px 1fr}
+.header{display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.brand{font-size:15px;font-weight:900;letter-spacing:.02em;white-space:nowrap}.brand span{color:var(--yellow)}
+.spacer{flex:1}
+.status-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.04em;color:var(--muted)}
+.pill.mode{background:#ffd74018;border-color:#ffd74044;color:var(--yellow)}
+.link-btn,.ghost-btn,.solid-btn{border-radius:4px;border:1px solid var(--line);padding:6px 10px;font-size:11px;font-weight:800;letter-spacing:.02em;text-decoration:none;cursor:pointer;white-space:nowrap}
+.link-btn{background:#2979ff18;color:var(--blue);border-color:#2979ff40}.ghost-btn{background:#1a2233;color:var(--text)}.solid-btn{background:#00e676;color:#06120a;border-color:#00e676}
+.main{padding:12px;max-width:1680px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.panel-title{font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.panel-body{padding:12px}
+.grid6{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:8px}
+.grid4{display:grid;grid-template-columns:repeat(4,minmax(180px,1fr));gap:8px}
+.filters{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:8px;align-items:end}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:.04em;text-transform:uppercase}
+.inp{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:4px;color:var(--text);font:inherit;padding:8px;outline:none}
+.inp:focus{border-color:var(--yellow)}
+.metric,.instrument-card,.strategy-card{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:10px}
+.metric-label{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.metric-value{font-size:18px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}.pos{color:var(--green)}.neg{color:var(--red)}.warn{color:var(--yellow)}
+.table-wrap{overflow:auto;max-height:380px;border:1px solid var(--line);border-radius:4px;background:var(--panel2)}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{position:sticky;top:0;background:#111827;color:var(--muted);font-size:10px;text-align:left;padding:7px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px;border-bottom:1px solid var(--line);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.badge{display:inline-flex;align-items:center;border-radius:3px;padding:2px 6px;font-size:10px;font-weight:900}
+.badge.run{background:#00e67618;color:var(--green)}
+.badge.review{background:#ffd74018;color:var(--yellow)}
+.badge.stop{background:#ff3d5718;color:var(--red)}
+.badge.live{background:#2979ff18;color:var(--blue)}
+.badge.off{background:#66708518;color:var(--muted)}
+.section-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.instrument-grid,.details-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+.strategy-card{display:flex;flex-direction:column;gap:8px}
+.strategy-top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.strategy-name{font-size:13px;font-weight:900}
+.strategy-meta{font-size:11px;color:var(--muted);line-height:1.45}
+.strategy-analysis{font-size:11px;line-height:1.5;color:var(--text)}
+.strategy-actions{display:flex;gap:8px;flex-wrap:wrap}
+.mini-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.mini{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:7px}
+.mini-label{font-size:10px;color:var(--muted);text-transform:uppercase}
+.mini-value{font-size:12px;font-weight:800;margin-top:2px}
+@media (max-width:1200px){.grid6{grid-template-columns:repeat(3,minmax(130px,1fr))}.section-grid{grid-template-columns:1fr}}
+@media (max-width:800px){.header{position:static;align-items:flex-start;padding:12px;flex-wrap:wrap}.filters,.grid4,.grid6{grid-template-columns:1fr 1fr}.status-strip{justify-content:flex-start}}
+@media (max-width:560px){.filters,.grid4,.grid6,.mini-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="header">
+    <div class="brand"><span>STRATEGY</span> Performance</div>
+    <div class="spacer"></div>
+    <div class="status-strip">
+      <span class="pill mode">POSITION-BASED ANALYSIS</span>
+      <span class="pill" id="refresh-pill">Auto refresh 10s</span>
+      <a class="link-btn" href="/btc.html">BTC</a>
+      <a class="link-btn" href="/btc10.html">BTC 10</a>
+      <a class="link-btn" href="/gold.html">Gold</a>
+      <a class="link-btn" href="/forex.html">FX</a>
+      <a class="link-btn" href="/pine.html">Pine</a>
+      <a class="link-btn" href="/allinone.html">All-in-One</a>
+      <a class="link-btn" href="/geminibtc.html">Gemini BTC</a>
+      <a class="link-btn" href="/llm.html">Gemini LLM</a>
+      <form method="POST" action="/logout" style="margin:0"><button class="ghost-btn" type="submit">Logout</button></form>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">Filters</div>
+        <div class="muted" id="updated-at">Waiting for data</div>
+      </div>
+      <div class="panel-body">
+        <div class="filters">
+          <div class="field"><label class="label" for="from-date">From Date</label><input class="inp" id="from-date" type="date"></div>
+          <div class="field"><label class="label" for="to-date">To Date</label><input class="inp" id="to-date" type="date"></div>
+          <div class="field"><label class="label" for="limit">Closed Trades Limit</label><input class="inp" id="limit" type="number" min="50" max="1000" step="50" value="400"></div>
+          <div class="field">
+            <div class="label">Actions</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="solid-btn" type="button" onclick="loadOverview(true)">Apply</button>
+              <button class="ghost-btn" type="button" onclick="resetRange()">Last 30 Days</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div class="panel-title">Overview</div><div class="muted" id="summary-sub">Consolidated strategy health</div></div>
+      <div class="panel-body">
+        <div class="grid6">
+          <div class="metric"><div class="metric-label">Strategies</div><div class="metric-value" id="strategy-count">0</div></div>
+          <div class="metric"><div class="metric-label">Should Run</div><div class="metric-value pos" id="should-run-count">0</div></div>
+          <div class="metric"><div class="metric-label">Review</div><div class="metric-value warn" id="should-review-count">0</div></div>
+          <div class="metric"><div class="metric-label">Should Stop</div><div class="metric-value neg" id="should-stop-count">0</div></div>
+          <div class="metric"><div class="metric-label">Running Now</div><div class="metric-value" id="running-count">0</div></div>
+          <div class="metric"><div class="metric-label">Net P&L</div><div class="metric-value" id="net-pnl">$0.00</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div class="panel-title">Instrument Categories</div><div class="muted" id="instrument-sub">Grouped by traded instrument</div></div>
+      <div class="panel-body"><div class="instrument-grid" id="instrument-grid"><div class="muted">Loading instruments...</div></div></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div class="panel-title">Run / Stop Recommendations</div><div class="muted" id="recommendation-sub">Based on open and closed positions</div></div>
+      <div class="panel-body">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Instrument</th><th>Strategy</th><th>Live</th><th>Recommendation</th><th>Confidence</th><th>Score</th><th>Trades</th><th>Win Rate</th><th>Open P&L</th><th>Realized</th><th>Net</th><th>Last Exit</th></tr></thead>
+            <tbody id="strategy-body"><tr><td colspan="12" class="muted">Loading strategies...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <div class="section-grid">
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Detailed Analysis</div><div class="muted" id="details-sub">Each strategy grouped by instrument</div></div>
+        <div class="panel-body" id="details-root"><div class="muted">Loading analysis...</div></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title">Daily Closed P&L</div><div class="muted" id="daily-sub">By exit date</div></div>
+        <div class="panel-body">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Strategies</th><th>Realized P&L</th></tr></thead>
+              <tbody id="daily-body"><tr><td colspan="6" class="muted">Loading daily data...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let refreshTimer = null;
+let refreshTick = 10;
+
+function esc (value) { return String(value ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m])); }
+function fmtUSD (n) {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return '--';
+  const v = Number(n || 0);
+  return (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function fmtPct (n) {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return '--';
+  const v = Number(n || 0);
+  return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+}
+function fmtTime (v) { return v ? new Date(v).toLocaleString([], { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '--'; }
+function pnlCls (n) { return Number(n) > 0 ? 'pos' : (Number(n) < 0 ? 'neg' : ''); }
+function badge (label, kind) { return `<span class="badge ${esc(kind || 'off')}">${esc(label || '--')}</span>`; }
+async function api (path) {
+  const res = await fetch(path);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function setPnlMetric (id, value) {
+  const el = $(id);
+  el.textContent = fmtUSD(value);
+  el.className = `metric-value ${pnlCls(value)}`;
+}
+function resetRange () {
+  const now = new Date();
+  $('to-date').value = now.toISOString().slice(0, 10);
+  $('from-date').value = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+function queryString () {
+  const params = new URLSearchParams();
+  if ($('from-date').value) params.set('fromDate', $('from-date').value);
+  if ($('to-date').value) params.set('toDate', $('to-date').value);
+  params.set('limit', String(Math.max(50, Math.min(1000, Number($('limit').value) || 400))));
+  return params.toString();
+}
+function renderSummary (data = {}) {
+  const s = data.summary || {};
+  $('strategy-count').textContent = s.strategyCount ?? 0;
+  $('should-run-count').textContent = s.shouldRunCount ?? 0;
+  $('should-review-count').textContent = s.shouldReviewCount ?? 0;
+  $('should-stop-count').textContent = s.shouldStopCount ?? 0;
+  $('running-count').textContent = s.runningStrategies ?? 0;
+  setPnlMetric('net-pnl', s.netPnl || 0);
+  $('summary-sub').textContent = `${s.instrumentCount || 0} traded instruments | ${s.openCount || 0} open positions | ${s.closedCount || 0} closed trades`;
+  $('updated-at').textContent = `Updated ${new Date(data.generatedAt || Date.now()).toLocaleTimeString()}`;
+}
+function renderInstruments (rows = []) {
+  const root = $('instrument-grid');
+  if (!rows.length) {
+    root.innerHTML = '<div class="muted">No instrument data.</div>';
+    return;
+  }
+  root.innerHTML = rows.map(row => `<div class="instrument-card">
+    <div class="strategy-top">
+      <div>
+        <div class="strategy-name">${esc(row.instrumentLabel)}</div>
+        <div class="strategy-meta">${esc(row.instrumentCategory)} instrument</div>
+      </div>
+      <div>${badge(`RUN ${row.runCount || 0}`, 'run')}</div>
+    </div>
+    <div class="mini-grid">
+      <div class="mini"><div class="mini-label">Strategies</div><div class="mini-value">${row.strategyCount || 0}</div></div>
+      <div class="mini"><div class="mini-label">Running</div><div class="mini-value">${row.runningCount || 0}</div></div>
+      <div class="mini"><div class="mini-label">Stop</div><div class="mini-value ${row.stopCount ? 'neg' : ''}">${row.stopCount || 0}</div></div>
+    </div>
+    <div class="strategy-meta">Review ${row.reviewCount || 0} | Open ${fmtUSD(row.openPnl)} | Realized ${fmtUSD(row.realizedPnl)}</div>
+    <div class="strategy-analysis">Net performance for this instrument is <span class="${pnlCls(row.netPnl)}">${fmtUSD(row.netPnl)}</span>.</div>
+  </div>`).join('');
+}
+function renderStrategies (rows = []) {
+  const body = $('strategy-body');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="12" class="muted">No strategy data.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(row => `<tr>
+    <td>${esc(row.instrumentLabel || '--')}</td>
+    <td>${esc(row.strategyName || '--')}</td>
+    <td>${badge(row.running ? 'LIVE' : 'OFF', row.running ? 'live' : 'off')}</td>
+    <td>${badge(String(row.recommendation?.label || 'Review').toUpperCase(), row.recommendation?.action || 'review')}</td>
+    <td>${esc(String(row.recommendation?.confidence || 'low').toUpperCase())}</td>
+    <td>${Number(row.recommendation?.score || 0).toFixed(0)}</td>
+    <td>${row.tradeCount || 0}</td>
+    <td class="${pnlCls((row.winRate || 0) - 50)}">${fmtPct(row.winRate || 0)}</td>
+    <td class="${pnlCls(row.openPnl)}">${fmtUSD(row.openPnl)}</td>
+    <td class="${pnlCls(row.realizedPnl)}">${fmtUSD(row.realizedPnl)}</td>
+    <td class="${pnlCls(row.netPnl)}">${fmtUSD(row.netPnl)}</td>
+    <td>${fmtTime(row.lastTradeTime)}</td>
+  </tr>`).join('');
+}
+function renderDaily (rows = []) {
+  const body = $('daily-body');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="muted">No daily data.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(row => `<tr>
+    <td>${esc(row.date)}</td>
+    <td>${row.tradeCount || 0}</td>
+    <td>${row.winCount || 0}</td>
+    <td>${row.lossCount || 0}</td>
+    <td>${row.strategyCount || 0}</td>
+    <td class="${pnlCls(row.realizedPnl)}">${fmtUSD(row.realizedPnl)}</td>
+  </tr>`).join('');
+}
+function renderDetails (rows = []) {
+  const root = $('details-root');
+  if (!rows.length) {
+    root.innerHTML = '<div class="muted">No strategy analysis yet.</div>';
+    return;
+  }
+  const grouped = rows.reduce((map, row) => {
+    const key = row.instrumentLabel || 'Unknown';
+    (map[key] ||= []).push(row);
+    return map;
+  }, {});
+  root.innerHTML = Object.entries(grouped).map(([instrument, items]) => `
+    <section style="margin-bottom:12px">
+      <div class="panel-title" style="margin-bottom:8px">${esc(instrument)}</div>
+      <div class="details-grid">
+        ${items.map(row => `<div class="strategy-card">
+          <div class="strategy-top">
+            <div>
+              <div class="strategy-name">${esc(row.strategyName || '--')}</div>
+              <div class="strategy-meta">${badge(row.running ? 'LIVE' : 'OFF', row.running ? 'live' : 'off')} ${badge(row.recommendation?.label || 'Review', row.recommendation?.action || 'review')}</div>
+            </div>
+            <div class="strategy-meta">Score ${Number(row.recommendation?.score || 0).toFixed(0)}</div>
+          </div>
+          <div class="mini-grid">
+            <div class="mini"><div class="mini-label">Trades</div><div class="mini-value">${row.tradeCount || 0}</div></div>
+            <div class="mini"><div class="mini-label">Win Rate</div><div class="mini-value ${pnlCls((row.winRate || 0) - 50)}">${fmtPct(row.winRate || 0)}</div></div>
+            <div class="mini"><div class="mini-label">Net</div><div class="mini-value ${pnlCls(row.netPnl)}">${fmtUSD(row.netPnl)}</div></div>
+          </div>
+          <div class="strategy-analysis">${esc(row.analysis?.headline || '')}</div>
+          <div class="strategy-meta">${esc(row.analysis?.detail || '')}</div>
+          <div class="strategy-meta">Recommendation reason: ${esc(row.recommendation?.reason || '')}</div>
+          <div class="strategy-actions">
+            ${row.route ? `<a class="link-btn" href="${esc(row.route)}">Open Page</a>` : ''}
+          </div>
+        </div>`).join('')}
+      </div>
+    </section>`).join('');
+}
+async function loadOverview (flash = false) {
+  const data = await api(`/api/performance/overview?${queryString()}`);
+  renderSummary(data);
+  renderInstruments(data.instrumentRows || []);
+  renderStrategies(data.strategyRows || []);
+  renderDaily(data.dailyRows || []);
+  renderDetails(data.strategyRows || []);
+  $('instrument-sub').textContent = `${(data.instrumentRows || []).length} instrument groups`;
+  $('recommendation-sub').textContent = `Run ${(data.summary?.shouldRunCount || 0)} | Review ${(data.summary?.shouldReviewCount || 0)} | Stop ${(data.summary?.shouldStopCount || 0)}`;
+  $('daily-sub').textContent = `Winning days ${data.summary?.winningDays || 0} | Losing days ${data.summary?.losingDays || 0}`;
+  if (flash) $('updated-at').textContent += ' • Applied';
+}
+function startAutoRefresh () {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTick = 10;
+  refreshTimer = setInterval(() => {
+    refreshTick -= 1;
+    $('refresh-pill').textContent = `Auto refresh ${refreshTick}s`;
+    if (refreshTick <= 0) {
+      refreshTick = 10;
+      loadOverview(false).catch(error => { $('updated-at').textContent = error.message; });
+    }
+  }, 1000);
+}
+resetRange();
+startAutoRefresh();
+loadOverview(false).catch(error => { $('updated-at').textContent = error.message; });
+</script>
+</body>
+</html>
