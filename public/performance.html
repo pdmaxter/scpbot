@@ -56,6 +56,8 @@ tr:last-child td{border-bottom:0}
 .mini{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:7px}
 .mini-label{font-size:10px;color:var(--muted);text-transform:uppercase}
 .mini-value{font-size:12px;font-weight:800;margin-top:2px}
+.sort-btn{display:inline-flex;align-items:center;gap:4px;background:none;border:none;color:inherit;font:inherit;font-weight:900;cursor:pointer;padding:0}
+.sort-btn .sort-ind{color:var(--muted);font-size:10px}
 @media (max-width:1200px){.grid6{grid-template-columns:repeat(3,minmax(130px,1fr))}.section-grid{grid-template-columns:1fr}}
 @media (max-width:800px){.header{position:static;align-items:flex-start;padding:12px;flex-wrap:wrap}.filters,.grid4,.grid6{grid-template-columns:1fr 1fr}.status-strip{justify-content:flex-start}}
 @media (max-width:560px){.filters,.grid4,.grid6,.mini-grid{grid-template-columns:1fr}}
@@ -127,8 +129,23 @@ tr:last-child td{border-bottom:0}
       <div class="panel-body">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Instrument</th><th>Strategy</th><th>Live</th><th>Recommendation</th><th>Confidence</th><th>Score</th><th>Trades</th><th>Win Rate</th><th>Open P&L</th><th>Realized</th><th>Net</th><th>Last Exit</th></tr></thead>
-            <tbody id="strategy-body"><tr><td colspan="12" class="muted">Loading strategies...</td></tr></tbody>
+            <thead><tr>
+              <th><button class="sort-btn" type="button" data-sort="instrumentLabel">Instrument <span class="sort-ind" data-sort-ind="instrumentLabel"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="strategyName">Strategy <span class="sort-ind" data-sort-ind="strategyName"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="running">Live <span class="sort-ind" data-sort-ind="running"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="recommendation">Recommendation <span class="sort-ind" data-sort-ind="recommendation"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="confidence">Confidence <span class="sort-ind" data-sort-ind="confidence"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="score">Score <span class="sort-ind" data-sort-ind="score"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="tradeCount">Total Trades <span class="sort-ind" data-sort-ind="tradeCount"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="winCount">Win Trades <span class="sort-ind" data-sort-ind="winCount"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="lossCount">Lost Trades <span class="sort-ind" data-sort-ind="lossCount"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="winRate">Win Rate <span class="sort-ind" data-sort-ind="winRate"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="openPnl">Open P&amp;L <span class="sort-ind" data-sort-ind="openPnl"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="realizedPnl">Realized <span class="sort-ind" data-sort-ind="realizedPnl"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="netPnl">Net <span class="sort-ind" data-sort-ind="netPnl"></span></button></th>
+              <th><button class="sort-btn" type="button" data-sort="lastTradeTime">Last Exit <span class="sort-ind" data-sort-ind="lastTradeTime"></span></button></th>
+            </tr></thead>
+            <tbody id="strategy-body"><tr><td colspan="14" class="muted">Loading strategies...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -159,6 +176,8 @@ tr:last-child td{border-bottom:0}
 const $ = id => document.getElementById(id);
 let refreshTimer = null;
 let refreshTick = 10;
+let strategyRowsState = [];
+let strategySort = { key:'winRate', dir:'desc' };
 
 function esc (value) { return String(value ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m])); }
 function fmtUSD (n) {
@@ -232,12 +251,15 @@ function renderInstruments (rows = []) {
   </div>`).join('');
 }
 function renderStrategies (rows = []) {
+  strategyRowsState = Array.isArray(rows) ? rows.slice() : [];
   const body = $('strategy-body');
-  if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="12" class="muted">No strategy data.</td></tr>';
+  if (!strategyRowsState.length) {
+    body.innerHTML = '<tr><td colspan="14" class="muted">No strategy data.</td></tr>';
+    updateSortIndicators();
     return;
   }
-  body.innerHTML = rows.map(row => `<tr>
+  const sortedRows = sortStrategyRows(strategyRowsState);
+  body.innerHTML = sortedRows.map(row => `<tr>
     <td>${esc(row.instrumentLabel || '--')}</td>
     <td>${esc(row.strategyName || '--')}</td>
     <td>${badge(row.running ? 'LIVE' : 'OFF', row.running ? 'live' : 'off')}</td>
@@ -245,12 +267,54 @@ function renderStrategies (rows = []) {
     <td>${esc(String(row.recommendation?.confidence || 'low').toUpperCase())}</td>
     <td>${Number(row.recommendation?.score || 0).toFixed(0)}</td>
     <td>${row.tradeCount || 0}</td>
+    <td>${row.winCount || 0}</td>
+    <td>${row.lossCount || 0}</td>
     <td class="${pnlCls((row.winRate || 0) - 50)}">${fmtPct(row.winRate || 0)}</td>
     <td class="${pnlCls(row.openPnl)}">${fmtUSD(row.openPnl)}</td>
     <td class="${pnlCls(row.realizedPnl)}">${fmtUSD(row.realizedPnl)}</td>
     <td class="${pnlCls(row.netPnl)}">${fmtUSD(row.netPnl)}</td>
     <td>${fmtTime(row.lastTradeTime)}</td>
   </tr>`).join('');
+  updateSortIndicators();
+}
+function sortStrategyRows (rows = []) {
+  const recommendationOrder = { run:3, review:2, stop:1 };
+  const confidenceOrder = { high:3, medium:2, low:1 };
+  const sortValue = (row, key) => {
+    switch (key) {
+      case 'running': return row.running ? 1 : 0;
+      case 'recommendation': return recommendationOrder[row.recommendation?.action] || 0;
+      case 'confidence': return confidenceOrder[row.recommendation?.confidence] || 0;
+      case 'score': return Number(row.recommendation?.score || 0);
+      case 'lastTradeTime': return Number(row.lastTradeTime || 0);
+      case 'instrumentLabel':
+      case 'strategyName': return String(row[key] || '').toLowerCase();
+      default: return typeof row[key] === 'string' ? String(row[key] || '').toLowerCase() : Number(row[key] || 0);
+    }
+  };
+  const dir = strategySort.dir === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const av = sortValue(a, strategySort.key);
+    const bv = sortValue(b, strategySort.key);
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    if (strategySort.key !== 'winRate') {
+      const winRateDiff = Number(b.winRate || 0) - Number(a.winRate || 0);
+      if (winRateDiff) return winRateDiff;
+    }
+    return String(a.strategyName || '').localeCompare(String(b.strategyName || ''));
+  });
+}
+function updateSortIndicators () {
+  document.querySelectorAll('[data-sort-ind]').forEach(el => {
+    const key = el.getAttribute('data-sort-ind');
+    el.textContent = key === strategySort.key ? (strategySort.dir === 'asc' ? '▲' : '▼') : '';
+  });
+}
+function setStrategySort (key) {
+  if (strategySort.key === key) strategySort.dir = strategySort.dir === 'asc' ? 'desc' : 'asc';
+  else strategySort = { key, dir: key === 'instrumentLabel' || key === 'strategyName' ? 'asc' : 'desc' };
+  renderStrategies(strategyRowsState);
 }
 function renderDaily (rows = []) {
   const body = $('daily-body');
@@ -329,6 +393,9 @@ function startAutoRefresh () {
     }
   }, 1000);
 }
+document.querySelectorAll('[data-sort]').forEach(btn => {
+  btn.addEventListener('click', () => setStrategySort(btn.getAttribute('data-sort')));
+});
 resetRange();
 startAutoRefresh();
 loadOverview(false).catch(error => { $('updated-at').textContent = error.message; });
